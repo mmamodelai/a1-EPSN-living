@@ -30,6 +30,11 @@ jobs:
         python run_espn_processor.py || echo "Processor failed but continuing..."
         echo "ESPN Data Processor completed at $(date)"
         
+    - name: Show Data Summary
+      run: |
+        echo "Current Data Summary:"
+        python -c "import sys; sys.path.append('src'); from espn_data_processor import ESPNDataProcessor; processor = ESPNDataProcessor(); summary = processor.get_data_summary(); [print(f'  {key}: {value}') for key, value in summary.items()]"
+        
     - name: Check for changes
       id: check_changes
       run: |

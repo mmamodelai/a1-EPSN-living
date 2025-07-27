@@ -28,16 +28,13 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         
-    - name: Run Tests
+    - name: Run Tests and Data Summary
       run: |
         echo "Running ESPN Data Processor Tests at $(date)"
         python test_data_processor.py
-        echo "Tests completed at $(date)"
-        
-    - name: Test Data Summary
-      run: |
         echo "Testing data summary functionality..."
         python -c "import sys; sys.path.append('src'); from espn_data_processor import ESPNDataProcessor; processor = ESPNDataProcessor(); summary = processor.get_data_summary(); print('Data Summary:'); [print(f'  {key}: {value}') for key, value in summary.items()]"
+        echo "Tests completed at $(date)"
         
     - name: Check for changes
       id: check_changes
