@@ -14,7 +14,17 @@ from espn_data_processor import ESPNDataProcessor
 
 def main():
     """Run the ESPN data processing pipeline"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='ESPN Data Processor')
+    parser.add_argument('--full-scrape', action='store_true', help='Run full scrape mode')
+    args = parser.parse_args()
+    
     print("ESPN Data Processor - Step 2 Pipeline")
+    if args.full_scrape:
+        print("Mode: FULL SCRAPE")
+    else:
+        print("Mode: INCREMENTAL UPDATE")
     print("=" * 50)
     
     try:

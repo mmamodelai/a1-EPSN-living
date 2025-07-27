@@ -1,0 +1,54 @@
+name: Weekly ESPN Data Update
+on:
+  schedule:
+    - cron: '0 14 * * 0'  # Sunday 2 PM UTC
+  workflow_dispatch:      # Manual trigger
+
+jobs:
+  update-espn-data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # CRITICAL - without this, commits fail
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Run ESPN Data Processor
+      run: |
+        echo "Starting ESPN Data Processor at $(date)"
+        python run_espn_processor.py || echo "Processor failed but continuing..."
+        echo "ESPN Data Processor completed at $(date)"
+        
+    - name: Check for changes
+      id: check_changes
+      run: |
+        git add .
+        if git diff --staged --quiet; then
+          echo "no_changes=true" >> $GITHUB_OUTPUT
+        else
+          echo "no_changes=false" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Commit and push changes
+      if: steps.check_changes.outputs.no_changes == 'false'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git commit -m "Weekly ESPN data update - $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        git push
+        
+    - name: No changes notification
+      if: steps.check_changes.outputs.no_changes == 'true'
+      run: |
+        echo "No changes detected - data is up to date" 

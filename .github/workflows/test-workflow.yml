@@ -1,0 +1,58 @@
+name: Test ESPN Data Processor
+on:
+  workflow_dispatch:  # Manual only
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'test_data_processor.py'
+      - 'run_espn_processor.py'
+
+jobs:
+  test-espn-processor:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Run Tests
+      run: |
+        echo "Running ESPN Data Processor Tests at $(date)"
+        python test_data_processor.py
+        echo "Tests completed at $(date)"
+        
+    - name: Test Data Summary
+      run: |
+        echo "Testing data summary functionality..."
+        python -c "import sys; sys.path.append('src'); from espn_data_processor import ESPNDataProcessor; processor = ESPNDataProcessor(); summary = processor.get_data_summary(); print('Data Summary:'); [print(f'  {key}: {value}') for key, value in summary.items()]"
+        
+    - name: Check for changes
+      id: check_changes
+      run: |
+        git add .
+        if git diff --staged --quiet; then
+          echo "no_changes=true" >> $GITHUB_OUTPUT
+        else
+          echo "no_changes=false" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Commit and push changes
+      if: steps.check_changes.outputs.no_changes == 'false'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git commit -m "Test workflow update - $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        git push 
