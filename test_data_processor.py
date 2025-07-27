@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Test script for ESPN Data Processor
-Tests the IN/OUT data folder functionality with UPSERT logic
+Test script for ESPN Data Processor (Simplified)
+Tests the IN/OUT data folder functionality with UPSERT logic for main outputs
 """
 
 import sys
@@ -15,8 +15,8 @@ sys.path.append(str(Path(__file__).parent / "src"))
 from espn_data_processor import ESPNDataProcessor
 
 def test_data_processor():
-    """Test the data processor functionality"""
-    print("Testing ESPN Data Processor...")
+    """Test the simplified data processor functionality"""
+    print("Testing ESPN Data Processor (Simplified)...")
     
     # Initialize processor
     processor = ESPNDataProcessor()
@@ -43,13 +43,13 @@ def test_data_processor():
     result_df = processor.upsert_data(existing_df, new_df)
     print(f"   UPSERT result: {len(result_df)} records (should equal existing: {len(existing_df)})")
     
-    # Test 4: Create backup
-    print("\n4. Testing backup creation...")
-    backup_dir = processor.create_backup()
-    print(f"   Backup created: {backup_dir}")
+    # Test 4: Clean temp folders
+    print("\n4. Testing temp folder cleaning...")
+    processor.clean_temp_folders()
+    print("   Temp folders cleaned and recreated")
     
     print("\nAll tests completed successfully!")
-    print("The data processor is working correctly with your existing data.")
+    print("The simplified data processor is working correctly with your existing data.")
 
 if __name__ == "__main__":
     test_data_processor() 

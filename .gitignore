@@ -22,4 +22,8 @@ Thumbs.db
 
 # Temporary files
 *.tmp
-*.temp 
+*.temp
+
+# Temp folders (overwritten each run)
+temp/
+html_cache/ 

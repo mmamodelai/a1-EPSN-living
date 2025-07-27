@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """
-ESPN Data Processor - Step 2 Pipeline
-Works IN and OUT of data folder with UPSERT logic
-
-This script processes ESPN MMA data while preserving existing data.
-It reads from data folder, processes with UPSERT logic, and writes back.
+ESPN Data Processor - Step 2 Pipeline (Simplified)
+Works IN and OUT of data folder with UPSERT logic for main outputs
+Overwrites HTML/temp files at folder level
 """
 
 import pandas as pd
@@ -25,88 +23,53 @@ logging.basicConfig(
 )
 
 class ESPNDataProcessor:
-    """Process ESPN MMA data with UPSERT logic"""
+    """Process ESPN MMA data with simplified UPSERT logic"""
     
     def __init__(self, data_folder="data"):
         self.data_folder = Path(data_folder)
-        self.backup_folder = self.data_folder / "backups"
-        self.backup_folder.mkdir(exist_ok=True)
         
-        # Data file paths
+        # Main output files (UPSERT)
         self.clinch_file = self.data_folder / "clinch_data_living.csv"
         self.ground_file = self.data_folder / "ground_data_living.csv"
         self.striking_file = self.data_folder / "striking_data_living.csv"
-        self.fighters_file = self.data_folder / "fighters_name.csv"
         self.profiles_file = self.data_folder / "fighter_profiles.csv"
+        
+        # Temp folders (OVERWRITE)
+        self.temp_folder = Path("temp")
+        self.html_folder = Path("html_cache")
         
         logging.info(f"ESPN Data Processor initialized for folder: {self.data_folder}")
     
-    def create_backup(self):
-        """Create timestamped backup of all data files"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_dir = self.backup_folder / f"backup_{timestamp}"
-        backup_dir.mkdir(exist_ok=True)
+    def clean_temp_folders(self):
+        """Clean and recreate temp folders (OVERWRITE policy)"""
+        folders_to_clean = [self.temp_folder, self.html_folder]
         
-        files_to_backup = [
-            self.clinch_file,
-            self.ground_file, 
-            self.striking_file,
-            self.fighters_file,
-            self.profiles_file
-        ]
-        
-        for file_path in files_to_backup:
-            if file_path.exists():
-                backup_path = backup_dir / file_path.name
-                shutil.copy2(file_path, backup_path)
-                logging.info(f"Backed up: {file_path.name}")
-        
-        logging.info(f"Backup created: {backup_dir}")
-        return backup_dir
+        for folder in folders_to_clean:
+            if folder.exists():
+                shutil.rmtree(folder)
+                logging.info(f"Cleaned temp folder: {folder}")
+            folder.mkdir(exist_ok=True)
+            logging.info(f"Created temp folder: {folder}")
     
     def load_existing_data(self):
-        """Load existing data from data folder"""
+        """Load existing main output files"""
         data = {}
         
-        # Load clinch data
-        if self.clinch_file.exists():
-            data['clinch'] = pd.read_csv(self.clinch_file)
-            logging.info(f"Loaded clinch data: {len(data['clinch'])} records")
-        else:
-            data['clinch'] = pd.DataFrame()
-            logging.warning("No existing clinch data found")
+        # Load main output files (UPSERT)
+        main_files = {
+            'clinch': self.clinch_file,
+            'ground': self.ground_file,
+            'striking': self.striking_file,
+            'profiles': self.profiles_file
+        }
         
-        # Load ground data
-        if self.ground_file.exists():
-            data['ground'] = pd.read_csv(self.ground_file)
-            logging.info(f"Loaded ground data: {len(data['ground'])} records")
-        else:
-            data['ground'] = pd.DataFrame()
-            logging.warning("No existing ground data found")
-        
-        # Load striking data
-        if self.striking_file.exists():
-            data['striking'] = pd.read_csv(self.striking_file)
-            logging.info(f"Loaded striking data: {len(data['striking'])} records")
-        else:
-            data['striking'] = pd.DataFrame()
-            logging.warning("No existing striking data found")
-        
-        # Load fighters data
-        if self.fighters_file.exists():
-            data['fighters'] = pd.read_csv(self.fighters_file)
-            logging.info(f"Loaded fighters data: {len(data['fighters'])} records")
-        else:
-            data['fighters'] = pd.DataFrame()
-            logging.warning("No existing fighters data found")
-        
-        # Load profiles data
-        if self.profiles_file.exists():
-            data['profiles'] = pd.read_csv(self.profiles_file)
-            logging.info(f"Loaded profiles data: {len(data['profiles'])} records")
-        else:
-            data['profiles'] = pd.DataFrame()
-            logging.warning("No existing profiles data found")
+        for data_type, file_path in main_files.items():
+            if file_path.exists():
+                data[data_type] = pd.read_csv(file_path)
+                logging.info(f"Loaded {data_type} data: {len(data[data_type])} records")
+            else:
+                data[data_type] = pd.DataFrame()
+                logging.warning(f"No existing {data_type} data found")
         
         return data
     
@@ -181,24 +144,24 @@ class ESPNDataProcessor:
         
         return updated_df
     
-    def process_fighters_data(self):
-        """Process fighters data with UPSERT logic"""
-        logging.info("Processing fighters data...")
+    def process_fighter_profiles(self):
+        """Process fighter profiles with UPSERT logic"""
+        logging.info("Processing fighter profiles...")
         
         # Load existing data
         existing_data = self.load_existing_data()
-        existing_df = existing_data.get('fighters', pd.DataFrame())
+        existing_df = existing_data.get('profiles', pd.DataFrame())
         
-        # TODO: Add fighter scraping logic here
+        # TODO: Add fighter profile scraping logic here
         # For now, we'll just preserve existing data
         new_df = pd.DataFrame()  # Placeholder for scraped data
         
-        # Apply UPSERT logic
+        # Apply UPSERT logic (use fighter name as key)
         updated_df = self.upsert_data(existing_df, new_df, key_columns=['Fighter Name'])
         
         # Save back to data folder
-        updated_df.to_csv(self.fighters_file, index=False)
-        logging.info(f"Saved fighters data: {len(updated_df)} records to {self.fighters_file}")
+        updated_df.to_csv(self.profiles_file, index=False)
+        logging.info(f"Saved fighter profiles: {len(updated_df)} records to {self.profiles_file}")
         
         return updated_df
     
@@ -207,15 +170,14 @@ class ESPNDataProcessor:
         logging.info("Starting ESPN Data Processing Pipeline")
         
         try:
-            # Create backup before processing
-            backup_dir = self.create_backup()
-            logging.info(f"Backup created: {backup_dir}")
+            # Clean temp folders (OVERWRITE policy)
+            self.clean_temp_folders()
             
-            # Process all data types
+            # Process main outputs (UPSERT policy)
             self.process_fight_data('clinch')
             self.process_fight_data('ground')
             self.process_fight_data('striking')
-            self.process_fighters_data()
+            self.process_fighter_profiles()
             
             logging.info("ESPN Data Processing Pipeline completed successfully")
             
@@ -224,15 +186,14 @@ class ESPNDataProcessor:
             raise
     
     def get_data_summary(self):
-        """Get summary of current data"""
+        """Get summary of current main output data"""
         data = self.load_existing_data()
         
         summary = {
             'clinch_records': len(data.get('clinch', pd.DataFrame())),
             'ground_records': len(data.get('ground', pd.DataFrame())),
             'striking_records': len(data.get('striking', pd.DataFrame())),
-            'fighters': len(data.get('fighters', pd.DataFrame())),
-            'profiles': len(data.get('profiles', pd.DataFrame()))
+            'fighter_profiles': len(data.get('profiles', pd.DataFrame()))
         }
         
         logging.info("Data Summary:")
