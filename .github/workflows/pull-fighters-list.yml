@@ -1,0 +1,82 @@
+name: Pull Fighters List from A0-roosterwatch
+
+on:
+  schedule:
+    - cron: '0 13 * * 0'  # Sunday 1 PM UTC (before ESPN scraping)
+  workflow_dispatch:      # Manual trigger
+  repository_dispatch:    # Trigger from other repos
+
+jobs:
+  pull-fighters-list:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    
+    steps:
+    - name: Checkout A1-ESPN-Profiles
+      uses: actions/checkout@v4
+      
+    - name: Checkout A0-roosterwatch
+      uses: actions/checkout@v4
+      with:
+        repository: mmamodelai/A0-roosterwatch
+        token: ${{ secrets.GITHUB_TOKEN }}
+        path: a0-roosterwatch
+        
+    - name: Copy fighters_name.csv
+      run: |
+        echo "Copying fighters_name.csv from A0-roosterwatch..."
+        
+        # Check if source file exists
+        if [ -f "a0-roosterwatch/A0 optional activefighters/data/fighters_name.csv" ]; then
+          echo "✅ Found fighters_name.csv in A0-roosterwatch"
+          
+          # Copy to A1-ESPN-Profiles data folder
+          cp "a0-roosterwatch/A0 optional activefighters/data/fighters_name.csv" "data/fighters_name.csv"
+          
+          # Show file info
+          echo "📊 fighters_name.csv details:"
+          wc -l "data/fighters_name.csv"
+          ls -lh "data/fighters_name.csv"
+          
+        else
+          echo "❌ fighters_name.csv not found in A0-roosterwatch"
+          echo "Available files in A0-roosterwatch:"
+          find a0-roosterwatch -name "*.csv" -type f
+          exit 1
+        fi
+        
+    - name: Check for changes
+      id: check_changes
+      run: |
+        git add data/fighters_name.csv
+        if git diff --staged --quiet; then
+          echo "no_changes=true" >> $GITHUB_OUTPUT
+          echo "No changes to fighters_name.csv"
+        else
+          echo "no_changes=false" >> $GITHUB_OUTPUT
+          echo "fighters_name.csv updated"
+        fi
+        
+    - name: Commit and push changes
+      if: steps.check_changes.outputs.no_changes == 'false'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git commit -m "Update fighters_name.csv from A0-roosterwatch - $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        git push
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: No changes notification
+      if: steps.check_changes.outputs.no_changes == 'true'
+      run: |
+        echo "fighters_name.csv is up to date"
+        
+    - name: Summary
+      run: |
+        echo "🎯 fighters_name.csv sync completed"
+        echo "📁 Source: A0-roosterwatch/A0 optional activefighters/data/fighters_name.csv"
+        echo "📁 Destination: A1-ESPN-Profiles/data/fighters_name.csv"
+        echo "⏰ Next sync: Sunday 1 PM UTC" 

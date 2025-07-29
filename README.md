@@ -14,29 +14,43 @@ This system processes ESPN MMA data with **simplified UPSERT logic** - it works 
 
 ## Data Structure
 
-The system works with these **4 main output files** in the `data/` folder:
+The system works with these **5 main files** and **1 HTML directory** in the `data/` folder:
 
 - `clinch_data_living.csv` - Clinch/grappling statistics (UPSERT)
 - `ground_data_living.csv` - Ground fighting statistics (UPSERT)
 - `striking_data_living.csv` - Striking statistics (UPSERT)
 - `fighter_profiles.csv` - Fighter profiles (UPSERT)
+- `fighters_name.csv` - **PULLED FROM A0-roosterwatch** (Cross-repo integration)
+- `FighterHTMLs/` - **FIGHTER HTML FILES** (UPSERT - preserved in GitHub)
 
 ## How It Works
 
-### 1. **READ FROM** Data Folder
+### 1. **PULL FIGHTERS LIST** from A0-roosterwatch
+- Automatically pulls latest `fighters_name.csv` from A0-roosterwatch
+- Ensures ESPN scraping uses current active fighter roster
+- Runs before ESPN data processing
+
+### 2. **PROCESS FIGHTER HTMLS** (UPSERT)
+- Scrapes HTML pages for fighters from ESPN
+- **Preserves existing HTML files** in GitHub
+- **Adds new HTML files** for new fighters
+- **Updates HTML files** only if content changed
+- **2,897+ HTML files** currently stored in GitHub
+
+### 3. **READ FROM** Data Folder
 - Loads existing CSV files from `data/` folder
 - Preserves all current main output data
 
-### 2. **PROCESS** with UPSERT Logic
+### 4. **PROCESS** with UPSERT Logic
 - Compares new data with existing data
 - Adds only new records (no duplicates)
 - Preserves manually added data
 
-### 3. **WRITE BACK TO** Data Folder
+### 5. **WRITE BACK TO** Data Folder
 - Saves enhanced data back to same files
 - Maintains file structure and naming
 
-### 4. **CLEAN TEMP FOLDERS** (OVERWRITE)
+### 6. **CLEAN TEMP FOLDERS** (OVERWRITE)
 - Completely removes and recreates `temp/` and `html_cache/` folders
 - Ensures clean slate for each run
 
@@ -81,6 +95,15 @@ This ensures:
 - `data/striking_data_living.csv`
 - `data/fighter_profiles.csv`
 
+### PULL Policy (Cross-Repo Integration)
+- `data/fighters_name.csv` - **Pulled from A0-roosterwatch** (overwrites local copy)
+
+### UPSERT Policy (HTML Files)
+- `data/FighterHTMLs/` - **Preserved in GitHub** (2,897+ files)
+- New HTML files added for new fighters
+- Existing HTML files updated only if content changed
+- No HTML files deleted
+
 ### OVERWRITE Policy (Temp Folders)
 - `temp/` - Completely cleaned and recreated
 - `html_cache/` - Completely cleaned and recreated
@@ -121,6 +144,28 @@ Main Output Files → Load → Process → UPSERT → Save → Enhanced Files
 
 Temp Folders → Clean → Recreate → Fresh Start
 ```
+
+## Cross-Repo Integration
+
+### A0-roosterwatch → A1-ESPN-Profiles
+- **Source**: `A0-roosterwatch/A0 optional activefighters/data/fighters_name.csv`
+- **Destination**: `A1-ESPN-Profiles/data/fighters_name.csv`
+- **Schedule**: Sunday 1 PM UTC (before ESPN scraping)
+- **Method**: GitHub Actions cross-repo checkout
+
+### Benefits
+- ✅ **Single source of truth** for active fighters
+- ✅ **Automatic synchronization** between repos
+- ✅ **No manual maintenance** of fighter lists
+- ✅ **Always current** fighter roster for ESPN scraping
+
+### HTML Storage Benefits
+- ✅ **Faster scraping** - No need to re-download existing HTML
+- ✅ **Reduced API calls** - Less load on ESPN servers
+- ✅ **Offline processing** - Can process data without internet
+- ✅ **Historical data** - Keep old HTML for analysis
+- ✅ **GitHub storage** - 2,897+ HTML files safely stored
+- ✅ **UPSERT protection** - Never lose existing HTML files
 
 ## Next Steps
 

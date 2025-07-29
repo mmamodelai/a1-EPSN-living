@@ -25,6 +25,13 @@ class ESPNDataProcessor:
         # Initialize the ESPN scraper
         self.espn_scraper = ESPNFighterScraper(delay_range=(2, 4))
         
+        # HTML storage (UPSERT) - Keep existing HTMLs in GitHub
+        self.fighter_html_folder = self.data_folder / "FighterHTMLs"
+        
+        # Temp folders (OVERWRITE)
+        self.temp_folder = Path("temp")
+        self.html_folder = Path("html_cache")
+        
         # Setup logging
         logging.basicConfig(
             level=logging.INFO,
@@ -42,6 +49,9 @@ class ESPNDataProcessor:
         self.striking_data = pd.DataFrame()
         self.fighter_profiles = pd.DataFrame()
         self.fighters_name = pd.DataFrame()
+        
+        self.logger.info(f"ESPN Data Processor initialized for folder: {self.data_folder}")
+        self.logger.info(f"Fighter HTML folder: {self.fighter_html_folder}")
         
         # Load existing data
         self._load_existing_data()
@@ -91,6 +101,76 @@ class ESPNDataProcessor:
                 
         except Exception as e:
             self.logger.error(f"Error loading existing data: {e}")
+    
+    def clean_temp_folders(self):
+        """Clean and recreate temp folders (OVERWRITE policy)"""
+        folders_to_clean = [self.temp_folder, self.html_folder]
+        
+        for folder in folders_to_clean:
+            if folder.exists():
+                shutil.rmtree(folder)
+                self.logger.info(f"Cleaned temp folder: {folder}")
+            folder.mkdir(exist_ok=True)
+            self.logger.info(f"Created temp folder: {folder}")
+    
+    def get_existing_html_files(self):
+        """Get list of existing HTML files in FighterHTMLs folder"""
+        if not self.fighter_html_folder.exists():
+            return set()
+        
+        html_files = set()
+        for file_path in self.fighter_html_folder.glob("*.html"):
+            html_files.add(file_path.stem)  # filename without extension
+        return html_files
+    
+    def upsert_html_files(self, new_html_files):
+        """
+        UPSERT logic for HTML files: Preserve existing, add new ones
+        
+        Args:
+            new_html_files: Dict of {fighter_name: html_content}
+        """
+        self.logger.info("Processing HTML files with UPSERT logic...")
+        
+        # Ensure FighterHTMLs folder exists
+        self.fighter_html_folder.mkdir(exist_ok=True)
+        
+        # Get existing HTML files
+        existing_files = self.get_existing_html_files()
+        self.logger.info(f"Found {len(existing_files)} existing HTML files")
+        
+        # Process new HTML files
+        for fighter_name, html_content in new_html_files.items():
+            # Clean fighter name for filename
+            safe_name = fighter_name.replace(' ', '_').replace('/', '_').replace('\\', '_')
+            html_file = self.fighter_html_folder / f"{safe_name}.html"
+            
+            # Only write if file doesn't exist or content is different
+            should_write = False
+            if not html_file.exists():
+                should_write = True
+                self.logger.info(f"New HTML file: {safe_name}")
+            else:
+                # Check if content is different
+                try:
+                    with open(html_file, 'r', encoding='utf-8') as f:
+                        existing_content = f.read()
+                    if existing_content != html_content:
+                        should_write = True
+                        self.logger.info(f"Updated HTML file: {safe_name}")
+                except Exception as e:
+                    self.logger.warning(f"Error reading existing HTML for {safe_name}: {e}")
+                    should_write = True
+            
+            if should_write:
+                try:
+                    with open(html_file, 'w', encoding='utf-8') as f:
+                        f.write(html_content)
+                    self.logger.info(f"Saved HTML for {fighter_name}")
+                except Exception as e:
+                    self.logger.error(f"Error saving HTML for {fighter_name}: {e}")
+        
+        self.logger.info(f"HTML UPSERT completed. Total files: {len(self.get_existing_html_files())}")
     
     def scrape_fighter_data(self, fighter_names: List[str]) -> Dict[str, pd.DataFrame]:
         """
@@ -223,6 +303,123 @@ class ESPNDataProcessor:
         Process fight data with UPSERT logic
         data_type: 'clinch', 'ground', 'striking', or 'all'
         """
+        logging.info(f"Processing {data_type} data...")
+        
+        # Load existing data
+        existing_data = self.load_existing_data()
+        existing_df = existing_data.get(data_type, pd.DataFrame())
+        
+        # TODO: Add ESPN scraping logic here
+        # For now, we'll just preserve existing data
+        new_df = pd.DataFrame()  # Placeholder for scraped data
+        
+        # Apply UPSERT logic
+        updated_df = self.upsert_data(existing_df, new_df)
+        
+        # Save back to data folder
+        if data_type == 'clinch':
+            output_file = self.clinch_file
+        elif data_type == 'ground':
+            output_file = self.ground_file
+        elif data_type == 'striking':
+            output_file = self.striking_file
+        
+        updated_df.to_csv(output_file, index=False)
+        logging.info(f"Saved {data_type} data: {len(updated_df)} records to {output_file}")
+        
+        return updated_df
+    
+    def scrape_fighter_htmls(self, fighter_names):
+        """
+        Scrape HTML pages for fighters (placeholder for actual scraping logic)
+        
+        Args:
+            fighter_names: List of fighter names to scrape
+            
+        Returns:
+            Dict of {fighter_name: html_content}
+        """
+        logging.info(f"Scraping HTML for {len(fighter_names)} fighters...")
+        
+        # TODO: Implement actual ESPN scraping logic here
+        # For now, this is a placeholder that simulates scraping
+        
+        scraped_htmls = {}
+        
+        for fighter_name in fighter_names:
+            # Simulate HTML content (replace with actual scraping)
+            html_content = f"""
+            <html>
+            <head><title>{fighter_name} - ESPN MMA</title></head>
+            <body>
+                <h1>{fighter_name}</h1>
+                <p>ESPN MMA fighter profile</p>
+                <p>Scraped at: {datetime.now().isoformat()}</p>
+            </body>
+            </html>
+            """
+            scraped_htmls[fighter_name] = html_content
+        
+        logging.info(f"Scraped HTML for {len(scraped_htmls)} fighters")
+        return scraped_htmls
+    
+    def process_fighter_htmls(self):
+        """Process fighter HTML files with UPSERT logic"""
+        logging.info("Processing fighter HTML files...")
+        
+        # Load fighters list (try test file first, then fallback to full list)
+        test_fighters_file = self.data_folder / "fighter_names.csv"
+        full_fighters_file = self.data_folder / "fighters_name.csv"
+        
+        if test_fighters_file.exists():
+            fighters_file = test_fighters_file
+            logging.info("Using TEST fighter list (fighter_names.csv)")
+        elif full_fighters_file.exists():
+            fighters_file = full_fighters_file
+            logging.info("Using FULL fighter list (fighters_name.csv)")
+        else:
+            logging.warning("No fighters list found, skipping HTML processing")
+            return
+        
+        fighters_df = pd.read_csv(fighters_file)
+        fighter_names = fighters_df['Fighter Name'].tolist()
+        
+        logging.info(f"Processing HTML for {len(fighter_names)} fighters")
+        
+        # Scrape HTML files
+        new_html_files = self.scrape_fighter_htmls(fighter_names)
+        
+        # Apply UPSERT logic to HTML files
+        new_count, updated_count = self.upsert_html_files(new_html_files)
+        
+        logging.info(f"HTML processing complete: {new_count} new, {updated_count} updated")
+        return new_count, updated_count
+    
+    def process_fighter_profiles(self):
+        """Process fighter profiles with UPSERT logic"""
+        logging.info("Processing fighter profiles...")
+        
+        # Load existing data
+        existing_data = self.load_existing_data()
+        existing_df = existing_data.get('profiles', pd.DataFrame())
+        
+        # TODO: Add fighter profile scraping logic here
+        # For now, we'll just preserve existing data
+        new_df = pd.DataFrame()  # Placeholder for scraped data
+        
+        # Apply UPSERT logic (use fighter name as key)
+        updated_df = self.upsert_data(existing_df, new_df, key_columns=['Fighter Name'])
+        
+        # Save back to data folder
+        updated_df.to_csv(self.profiles_file, index=False)
+        logging.info(f"Saved fighter profiles: {len(updated_df)} records to {self.profiles_file}")
+        
+        return updated_df
+    
+    def run_full_processing(self):
+        """Run full data processing pipeline"""
+        logging.info("Starting ESPN Data Processing Pipeline")
+        
         try:
             # Get fighter names to scrape
             if len(self.fighters_name) == 0:
@@ -231,8 +428,14 @@ class ESPNDataProcessor:
             else:
                 fighter_names = self.fighters_name['fighters'].tolist()
             
-            # Scrape new data
-            scraped_data = self.scrape_fighter_data(fighter_names)
+            # Process fighter HTMLs (UPSERT policy)
+            self.process_fighter_htmls()
+            
+            # Process main outputs (UPSERT policy)
+            self.process_fight_data('clinch')
+            self.process_fight_data('ground')
+            self.process_fight_data('striking')
+            self.process_fighter_profiles()
             
             # Process each data type
             if data_type in ['clinch', 'all']:
@@ -376,13 +579,18 @@ class ESPNDataProcessor:
             self.logger.error(f"Error cleaning temp folders: {e}")
     
     def get_data_summary(self):
-        """Get summary of all data"""
+        """Get summary of current main output data"""
+        data = self.load_existing_data()
+        
+        # Count HTML files
+        html_count = len(self.get_existing_html_files())
+        
         summary = {
-            'clinch_records': len(self.clinch_data),
-            'ground_records': len(self.ground_data),
-            'striking_records': len(self.striking_data),
-            'fighters': len(self.fighters_name),
-            'profiles': len(self.fighter_profiles)
+            'clinch_records': len(data.get('clinch', pd.DataFrame())),
+            'ground_records': len(data.get('ground', pd.DataFrame())),
+            'striking_records': len(data.get('striking', pd.DataFrame())),
+            'fighter_profiles': len(data.get('profiles', pd.DataFrame())),
+            'fighter_html_files': html_count
         }
         
         self.logger.info("Data Summary:")
