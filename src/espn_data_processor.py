@@ -50,6 +50,12 @@ class ESPNDataProcessor:
         self.fighter_profiles = pd.DataFrame()
         self.fighters_name = pd.DataFrame()
         
+        # Define file paths
+        self.clinch_file = self.data_folder / "clinch_data_living.csv"
+        self.ground_file = self.data_folder / "ground_data_living.csv"
+        self.striking_file = self.data_folder / "striking_data_living.csv"
+        self.profiles_file = self.data_folder / "fighter_profiles.csv"
+        
         self.logger.info(f"ESPN Data Processor initialized for folder: {self.data_folder}")
         self.logger.info(f"Fighter HTML folder: {self.fighter_html_folder}")
         
@@ -303,31 +309,47 @@ class ESPNDataProcessor:
         Process fight data with UPSERT logic
         data_type: 'clinch', 'ground', 'striking', or 'all'
         """
-        logging.info(f"Processing {data_type} data...")
+        self.logger.info(f"Processing {data_type} data...")
         
-        # Load existing data
-        existing_data = self.load_existing_data()
-        existing_df = existing_data.get(data_type, pd.DataFrame())
-        
-        # TODO: Add ESPN scraping logic here
-        # For now, we'll just preserve existing data
-        new_df = pd.DataFrame()  # Placeholder for scraped data
-        
-        # Apply UPSERT logic
-        updated_df = self.upsert_data(existing_df, new_df)
-        
-        # Save back to data folder
-        if data_type == 'clinch':
-            output_file = self.clinch_file
-        elif data_type == 'ground':
-            output_file = self.ground_file
-        elif data_type == 'striking':
-            output_file = self.striking_file
-        
-        updated_df.to_csv(output_file, index=False)
-        logging.info(f"Saved {data_type} data: {len(updated_df)} records to {output_file}")
-        
-        return updated_df
+        try:
+            if data_type == 'all':
+                # Process all data types
+                self.process_fight_data('clinch')
+                self.process_fight_data('ground')
+                self.process_fight_data('striking')
+                self.process_fighter_profiles()
+                return
+            
+            # Load existing data
+            existing_data = self._load_existing_data()
+            existing_df = existing_data.get(data_type, pd.DataFrame())
+            
+            # TODO: Add ESPN scraping logic here
+            # For now, we'll just preserve existing data
+            new_df = pd.DataFrame()  # Placeholder for scraped data
+            
+            # Apply UPSERT logic
+            updated_df = self.upsert_data(existing_df, new_df)
+            
+            # Save back to data folder
+            if data_type == 'clinch':
+                output_file = self.clinch_file
+            elif data_type == 'ground':
+                output_file = self.ground_file
+            elif data_type == 'striking':
+                output_file = self.striking_file
+            else:
+                self.logger.warning(f"Unknown data type: {data_type}")
+                return
+            
+            updated_df.to_csv(output_file, index=False)
+            self.logger.info(f"Saved {data_type} data: {len(updated_df)} records to {output_file}")
+            
+            return updated_df
+            
+        except Exception as e:
+            self.logger.error(f"Error processing {data_type} data: {e}")
+            return None
     
     def scrape_fighter_htmls(self, fighter_names):
         """
@@ -400,7 +422,7 @@ class ESPNDataProcessor:
         logging.info("Processing fighter profiles...")
         
         # Load existing data
-        existing_data = self.load_existing_data()
+        existing_data = self._load_existing_data()
         existing_df = existing_data.get('profiles', pd.DataFrame())
         
         # TODO: Add fighter profile scraping logic here
@@ -417,43 +439,28 @@ class ESPNDataProcessor:
         return updated_df
     
     def run_full_processing(self):
-        """Run full data processing pipeline"""
-        logging.info("Starting ESPN Data Processing Pipeline")
-        
+        """Run complete data processing pipeline"""
         try:
-            # Get fighter names to scrape
-            if len(self.fighters_name) == 0:
-                self.logger.warning("No fighters list available, using sample data")
-                fighter_names = ['Robert Whittaker', 'Israel Adesanya', 'Alex Pereira']
-            else:
-                fighter_names = self.fighters_name['fighters'].tolist()
+            self.logger.info("Starting full ESPN data processing pipeline")
             
-            # Process fighter HTMLs (UPSERT policy)
-            self.process_fighter_htmls()
+            # Process all data types
+            self.process_fight_data('all')
             
-            # Process main outputs (UPSERT policy)
-            self.process_fight_data('clinch')
-            self.process_fight_data('ground')
-            self.process_fight_data('striking')
-            self.process_fighter_profiles()
+            # Save processed data
+            self.save_data()
             
-            # Process each data type
-            if data_type in ['clinch', 'all']:
-                self._upsert_data('clinch', scraped_data['clinch'])
+            # Clean temp folders
+            self.clean_temp_folders()
             
-            if data_type in ['ground', 'all']:
-                self._upsert_data('ground', scraped_data['ground'])
+            # Get summary
+            summary = self.get_data_summary()
             
-            if data_type in ['striking', 'all']:
-                self._upsert_data('striking', scraped_data['striking'])
-            
-            if data_type in ['profiles', 'all']:
-                self._upsert_data('profiles', scraped_data['profiles'])
-            
-            self.logger.info(f"Completed processing {data_type} data")
+            self.logger.info("Full processing pipeline completed successfully")
+            return summary
             
         except Exception as e:
-            self.logger.error(f"Error processing fight data: {e}")
+            self.logger.error(f"Error in full processing pipeline: {e}")
+            return None
     
     def _upsert_data(self, data_type: str, new_df: pd.DataFrame):
         """Apply UPSERT logic to merge new data with existing data"""
@@ -598,6 +605,41 @@ class ESPNDataProcessor:
             self.logger.info(f"  {key}: {value}")
         
         return summary
+    
+    def upsert_data(self, existing_df: pd.DataFrame, new_df: pd.DataFrame, key_columns: List[str] = None):
+        """
+        Apply UPSERT logic to merge new data with existing data
+        
+        Args:
+            existing_df: Existing DataFrame
+            new_df: New DataFrame to merge
+            key_columns: Columns to use as key for deduplication
+        """
+        try:
+            if new_df.empty:
+                self.logger.info("No new data to process, returning existing data")
+                return existing_df
+            
+            if existing_df.empty:
+                self.logger.info(f"UPSERT: No existing data, using {len(new_df)} new records")
+                return new_df
+            
+            # Use default key columns if not specified
+            if key_columns is None:
+                key_columns = ['Player', 'Date', 'Opponent']
+            
+            # Combine existing and new data
+            combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+            
+            # Remove duplicates based on key columns
+            combined_df = combined_df.drop_duplicates(subset=key_columns, keep='first')
+            
+            self.logger.info(f"UPSERT: Merged {len(new_df)} new records with {len(existing_df)} existing records")
+            return combined_df
+            
+        except Exception as e:
+            self.logger.error(f"Error in UPSERT: {e}")
+            return existing_df
     
     def run_full_processing(self):
         """Run complete data processing pipeline"""
