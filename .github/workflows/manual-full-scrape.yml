@@ -45,7 +45,7 @@ jobs:
         echo "   ✅ HTML Files (complete ESPN pages)"
         echo ""
         
-        python run_espn_processor.py --full-scrape
+        python run_espn_processor.py --data-type all
         
         echo "✅ Full ESPN Scrape completed at $(date)"
         
