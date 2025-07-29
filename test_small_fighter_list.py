@@ -1,80 +1,91 @@
 #!/usr/bin/env python3
 """
-Test Small Fighter List
-Run the ESPN processor with just 25 test fighters
+Test script to scrape the 24 fighters with small HTML files
 """
 
+import json
 import sys
-from pathlib import Path
-
-# Add src to path
-sys.path.append(str(Path(__file__).parent / "src"))
+import os
+sys.path.append('src')
 
 from espn_data_processor import ESPNDataProcessor
+import logging
 
-def main():
-    """Test the processor with small fighter list"""
-    print("🧪 Testing Small Fighter List (25 fighters)")
-    print("=" * 50)
-    
+def load_fighter_list():
+    """Load the list of fighters to scrape"""
     try:
-        # Initialize processor
-        processor = ESPNDataProcessor()
-        
-        # Show initial data summary
-        print("\n📊 Initial Data Summary:")
-        print("-" * 30)
-        initial_summary = processor.get_data_summary()
-        for key, value in initial_summary.items():
-            print(f"  {key}: {value}")
-        
-        # Run HTML processing only (skip CSV processing for now)
-        print("\n🔄 Processing Fighter HTMLs...")
-        print("-" * 30)
-        
-        # Load test fighters list
-        test_fighters_file = Path("data/fighter_names.csv")
-        if test_fighters_file.exists():
-            import pandas as pd
-            fighters_df = pd.read_csv(test_fighters_file)
-            fighter_names = fighters_df['Fighter Name'].tolist()
-            print(f"📋 Loaded {len(fighter_names)} test fighters:")
-            for i, name in enumerate(fighter_names, 1):
-                print(f"  {i:2d}. {name}")
-        else:
-            print("❌ Test fighters file not found")
-            return False
-        
-        # Process HTML files
-        new_count, updated_count = processor.process_fighter_htmls()
-        
-        # Show final data summary
-        print("\n📊 Final Data Summary:")
-        print("-" * 30)
-        final_summary = processor.get_data_summary()
-        for key, value in final_summary.items():
-            print(f"  {key}: {value}")
-        
-        # Show changes
-        print("\n📈 Changes Summary:")
-        print("-" * 30)
-        html_change = final_summary['fighter_html_files'] - initial_summary['fighter_html_files']
-        print(f"  HTML files: {initial_summary['fighter_html_files']} → {final_summary['fighter_html_files']} ({html_change:+d})")
-        print(f"  New HTML files: {new_count}")
-        print(f"  Updated HTML files: {updated_count}")
-        
-        print("\n🎉 Small fighter list test completed successfully!")
-        print(f"✅ Processed {len(fighter_names)} fighters")
-        print(f"✅ HTML UPSERT working correctly")
-        
-        return True
-        
+        with open('fighters_to_scrape.json', 'r') as f:
+            fighters = json.load(f)
+        return fighters
     except Exception as e:
-        print(f"\n❌ Test failed: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+        print(f"Error loading fighter list: {e}")
+        return []
+
+def test_small_fighter_scraping():
+    """Test scraping the fighters with small HTML files"""
+    print("=== Testing Small Fighter List Scraping ===")
+    
+    # Load fighter list
+    fighters = load_fighter_list()
+    if not fighters:
+        print("❌ No fighters loaded!")
+        return
+    
+    print(f"📋 Loaded {len(fighters)} fighters to scrape:")
+    for i, fighter in enumerate(fighters, 1):
+        print(f"   {i:2d}. {fighter}")
+    
+    print(f"\n🚀 Starting scrape with improved anti-detection features...")
+    print("   ✅ Max 25 requests per minute")
+    print("   ✅ Exponential backoff retries")
+    print("   ✅ Realistic browser headers")
+    print("   ✅ User agent rotation")
+    
+    # Initialize processor
+    processor = ESPNDataProcessor()
+    
+    # Scrape the fighters
+    print(f"\n--- Scraping {len(fighters)} fighters ---")
+    scraped_htmls = processor.scrape_fighter_htmls(fighters)
+    
+    print(f"\n📊 Results:")
+    success_count = 0
+    for fighter_name, html_content in scraped_htmls.items():
+        html_size = len(html_content)
+        print(f"  {fighter_name}: {html_size:,} bytes ({html_size/1024:.1f} KB)")
+        
+        # Check if it's a real ESPN page
+        if "prtlCmnApiRsp" in html_content:
+            print(f"    ✅ Real ESPN data found")
+            success_count += 1
+        else:
+            print(f"    ❌ Placeholder content")
+    
+    print(f"\n🎯 Summary:")
+    print(f"   Total fighters: {len(fighters)}")
+    print(f"   Successfully scraped: {len(scraped_htmls)}")
+    print(f"   Real ESPN data: {success_count}")
+    print(f"   Success rate: {len(scraped_htmls)/len(fighters)*100:.1f}%")
+    
+    # Check file sizes after scraping
+    print(f"\n📁 Checking file sizes after scraping...")
+    from pathlib import Path
+    html_folder = Path("data/FighterHTMLs")
+    
+    small_files_after = []
+    for fighter in fighters:
+        html_file = html_folder / f"{fighter.replace(' ', '_')}.html"
+        if html_file.exists():
+            file_size = html_file.stat().st_size
+            if file_size < 5000:  # Under 5KB
+                small_files_after.append((fighter, file_size))
+    
+    if small_files_after:
+        print(f"❌ Still have {len(small_files_after)} small files:")
+        for fighter, size in small_files_after:
+            print(f"   {fighter}: {size} bytes ({size/1024:.1f} KB)")
+    else:
+        print("✅ All files are now large (>5KB)!")
 
 if __name__ == "__main__":
-    success = main()
-    sys.exit(0 if success else 1) 
+    test_small_fighter_scraping() 

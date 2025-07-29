@@ -4,128 +4,215 @@ Extracts fighter statistics from ESPN MMA fighter pages
 """
 
 import requests
+import pandas as pd
+from pathlib import Path
 import time
 import logging
-import pandas as pd
-from bs4 import BeautifulSoup
-from urllib.parse import quote
+from typing import Dict, List, Optional
+import json
+from requests.adapters import HTTPAdapter
+from requests.packages.urllib3.util.retry import Retry
 import random
-from typing import Dict, List, Optional, Tuple
+from datetime import datetime
+from bs4 import BeautifulSoup
 
 class ESPNFighterScraper:
-    """Scrapes fighter data from ESPN MMA pages"""
-    
-    def __init__(self, delay_range=(2, 4)):
-        self.delay_range = delay_range
-        self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    USER_AGENTS = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.1 Safari/605.1.15',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36 Edg/91.0.864.59',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    ]
+
+    def __init__(self, html_profile_dir: Path = None, max_workers: int = 3, 
+                 rate_limit: float = 2.0, max_retries: int = 5):
+        self.html_profile_dir = html_profile_dir or Path("data/FighterHTMLs")
+        self.html_profile_dir.mkdir(parents=True, exist_ok=True)
+        self.max_workers = max_workers
+        self.rate_limit = rate_limit
+        self.max_retries = max_retries
+        self.session = self._create_session()
+        
+        # Request tracking for anti-detection
+        self.success_count = 0
+        self.failure_count = 0
+        self.last_request_time = 0
+        self.request_count = 0
+        self.requests_this_minute = 0
+        self.minute_start = datetime.now()
+        
+        self.logger = logging.getLogger(__name__)
+
+    def _create_session(self) -> requests.Session:
+        session = requests.Session()
+        
+        # Advanced retry strategy with exponential backoff
+        retry_strategy = Retry(
+            total=3,
+            backoff_factor=2,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET"]
+        )
+        
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        
+        # More realistic browser headers
+        session.headers.update({
+            'User-Agent': random.choice(self.USER_AGENTS),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
         })
         
-        # ESPN MMA base URL
-        self.base_url = "https://www.espn.com/mma"
-        
-        # User agent rotation
-        self.user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.107 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0'
-        ]
-        
-        logging.basicConfig(level=logging.INFO)
-        self.logger = logging.getLogger(__name__)
-    
-    def _random_delay(self):
-        """Add random delay between requests"""
-        delay = random.uniform(*self.delay_range)
-        time.sleep(delay)
-    
+        return session
+
     def _rotate_user_agent(self):
-        """Rotate user agent to avoid detection"""
-        self.session.headers['User-Agent'] = random.choice(self.user_agents)
+        self.session.headers['User-Agent'] = random.choice(self.USER_AGENTS)
+
+    def _rate_limit_wait(self):
+        current_time = datetime.now()
+        
+        # Reset minute counter if a minute has passed
+        if (current_time - self.minute_start).total_seconds() >= 60:
+            self.requests_this_minute = 0
+            self.minute_start = current_time
+        
+        # Enforce max 25 requests per minute (ESPN's limit)
+        if self.requests_this_minute >= 25:
+            sleep_time = 60 - (current_time - self.minute_start).total_seconds()
+            if sleep_time > 0:
+                self.logger.info(f"Rate limit reached, sleeping for {sleep_time:.1f} seconds")
+                time.sleep(sleep_time)
+                self.minute_start = datetime.now()
+                self.requests_this_minute = 0
+        
+        # Basic delay between requests
+        current_time = time.time()
+        time_since_last = current_time - self.last_request_time
+        if time_since_last < self.rate_limit:
+            sleep_time = self.rate_limit - time_since_last
+            time.sleep(sleep_time)
+        
+        self.last_request_time = time.time()
+        self.requests_this_minute += 1
+
+    def _make_request(self, url: str, retries: int = 0) -> requests.Response:
+        try:
+            self._rate_limit_wait()
+            self._rotate_user_agent()
+            
+            response = self.session.get(url, timeout=10)
+            response.raise_for_status()
+            return response
+            
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 403 and retries < self.max_retries:
+                wait_time = (2 ** retries) + random.uniform(0, 1)
+                self.logger.warning(f"403 error, waiting {wait_time:.2f} seconds before retry {retries + 1}")
+                time.sleep(wait_time)
+                return self._make_request(url, retries + 1)
+            raise
+        except requests.exceptions.RequestException as e:
+            if retries < self.max_retries:
+                wait_time = (2 ** retries) + random.uniform(0, 1)
+                self.logger.warning(f"Request failed, waiting {wait_time:.2f} seconds before retry {retries + 1}")
+                time.sleep(wait_time)
+                return self._make_request(url, retries + 1)
+            else:
+                self.logger.error(f"Request failed for {url} after {self.max_retries} retries: {e}")
+                raise
     
     def search_fighter_url(self, fighter_name: str) -> Optional[str]:
-        """
-        Search for fighter's ESPN page URL
-        Returns the fighter's ESPN URL if found
-        """
+        """Search for fighter URL using ESPN's search API"""
         try:
-            # Clean fighter name for search
-            search_name = fighter_name.replace(' ', '-').lower()
+            # Use ESPN's search API like the working scraper
+            encoded_name = requests.utils.quote(fighter_name)
+            search_url = f"https://site.web.api.espn.com/apis/search/v2?region=us&lang=en&limit=10&page=1&query={encoded_name}"
             
-            # Try direct fighter URL first
-            direct_url = f"{self.base_url}/fighter/_/name/{search_name}"
+            response = self._make_request(search_url)
+            data_json = response.json()
             
-            self._rotate_user_agent()
-            response = self.session.get(direct_url, timeout=30)
+            # Find player data
+            player_json_data = None
+            if "results" in data_json:
+                for result in data_json["results"]:
+                    if result.get("type") == "player":
+                        contents = result.get("contents", [])
+                        if isinstance(contents, list):
+                            for content in contents:
+                                if content.get("sport") == "mma":
+                                    player_json_data = content
+                                    break
+                    if player_json_data:
+                        break
             
-            if response.status_code == 200:
-                return direct_url
+            if not player_json_data:
+                self.logger.warning(f"No MMA fighter found for {fighter_name}")
+                return None
             
-            # If direct URL fails, try search
-            search_url = f"{self.base_url}/search?q={quote(fighter_name)}"
+            # Get the stats page URL
+            profile_url = player_json_data["link"]["web"]
+            stats_url = profile_url.replace("/_/id/", "/stats/_/id/")
             
-            self._rotate_user_agent()
-            response = self.session.get(search_url, timeout=30)
-            response.raise_for_status()
-            
-            soup = BeautifulSoup(response.content, 'html.parser')
-            
-            # Look for fighter links in search results
-            fighter_links = soup.find_all('a', href=True)
-            
-            for link in fighter_links:
-                href = link.get('href', '')
-                if '/mma/fighter/' in href and fighter_name.lower() in link.get_text().lower():
-                    return f"https://www.espn.com{href}"
-            
-            # If no fighter found, return None
-            self.logger.warning(f"No ESPN page found for {fighter_name}")
-            return None
+            self.logger.info(f"Found fighter URL for {fighter_name}: {stats_url}")
+            return stats_url
             
         except Exception as e:
-            self.logger.error(f"Error searching for {fighter_name}: {e}")
+            self.logger.error(f"Error searching for {fighter_name}: {str(e)}")
             return None
     
-    def get_fighter_stats(self, fighter_name: str) -> Dict:
+    def get_fighter_stats(self, fighter_name: str) -> Optional[Dict]:
         """
-        Get comprehensive fighter statistics from ESPN
-        Returns a dictionary with all fighter stats
+        Get fighter statistics from ESPN and save HTML file
+        Returns a dictionary with fighter stats
         """
         try:
             # Search for fighter URL
             fighter_url = self.search_fighter_url(fighter_name)
+            
             if not fighter_url:
-                self.logger.warning(f"Could not find ESPN page for {fighter_name}")
-                return {}
+                self.logger.warning(f"Could not find URL for {fighter_name}")
+                self.failure_count += 1
+                return None
             
-            self._rotate_user_agent()
-            response = self.session.get(fighter_url, timeout=30)
-            response.raise_for_status()
+            # Get the fighter page content
+            profile_response = self._make_request(fighter_url)
             
-            soup = BeautifulSoup(response.content, 'html.parser')
+            # Save HTML content directly
+            file_path = self.html_profile_dir / f"{fighter_name.replace(' ', '_')}.html"
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(profile_response.text)
             
-            # Extract fighter statistics
-            stats = {
-                'fighter_name': fighter_name,
-                'espn_url': fighter_url,
-                'scraped_at': pd.Timestamp.now().isoformat()
+            self.logger.info(f"Saved HTML for {fighter_name} to {file_path}")
+            
+            # Extract basic stats (placeholder for now)
+            soup = BeautifulSoup(profile_response.content, 'html.parser')
+            fight_stats = self._extract_fight_stats(soup)
+            fight_history = self._extract_fight_history(soup)
+            
+            fighter_data = {
+                'name': fighter_name,
+                'url': fighter_url,
+                'scraped_at': datetime.now().isoformat(),
+                'fight_stats': fight_stats,
+                'fight_history': fight_history,
+                'html_file': str(file_path)
             }
             
-            # Extract fight statistics
-            stats.update(self._extract_fight_stats(soup))
-            
-            # Extract detailed fight history
-            fight_history = self._extract_fight_history(soup)
-            stats['fight_history'] = fight_history
-            
-            self._random_delay()
-            return stats
+            self.success_count += 1
+            self.logger.info(f"Successfully scraped data for {fighter_name}")
+            return fighter_data
             
         except Exception as e:
-            self.logger.error(f"Error scraping stats for {fighter_name}: {e}")
-            return {'fighter_name': fighter_name, 'error': str(e)}
+            self.failure_count += 1
+            self.logger.error(f"Error getting stats for {fighter_name}: {e}")
+            return None
     
     def _extract_fight_stats(self, soup: BeautifulSoup) -> Dict:
         """Extract fight statistics from ESPN page"""
@@ -289,7 +376,10 @@ class ESPNFighterScraper:
             self.logger.info(f"Scraping {fighter_name} ({i+1}/{total_fighters})")
             
             fighter_stats = self.get_fighter_stats(fighter_name)
-            results.append(fighter_stats)
+            if fighter_stats:
+                results.append(fighter_stats)
+            else:
+                results.append({'name': fighter_name, 'error': 'Could not find fighter URL'})
             
             if progress_callback:
                 progress_callback(i + 1, total_fighters, fighter_name)
@@ -340,6 +430,7 @@ if __name__ == "__main__":
     results = scraper.scrape_fighters_batch(test_fighters)
     
     for result in results:
-        print(f"\nFighter: {result.get('fighter_name', 'Unknown')}")
-        print(f"URL: {result.get('espn_url', 'Not found')}")
-        print(f"Stats: {result}")
+        print(f"\nFighter: {result.get('name', 'Unknown')}")
+        print(f"URL: {result.get('url', 'Not found')}")
+        print(f"Stats: {result.get('fight_stats', 'N/A')}")
+        print(f"History: {result.get('fight_history', 'N/A')}")

@@ -11,9 +11,10 @@ from pathlib import Path
 from datetime import datetime
 import shutil
 from typing import Dict, List, Optional
+from bs4 import BeautifulSoup
 
 # Import the new ESPN scraper
-from espn_scraper import ESPNFighterScraper, create_sample_fighter_data
+from src.espn_scraper import ESPNFighterScraper, create_sample_fighter_data
 
 class ESPNDataProcessor:
     """Processes ESPN MMA data with UPSERT logic and real scraping"""
@@ -22,11 +23,16 @@ class ESPNDataProcessor:
         self.data_folder = Path(data_folder)
         self.data_folder.mkdir(exist_ok=True)
         
-        # Initialize the ESPN scraper
-        self.espn_scraper = ESPNFighterScraper(delay_range=(2, 4))
-        
         # HTML storage (UPSERT) - Keep existing HTMLs in GitHub
         self.fighter_html_folder = self.data_folder / "FighterHTMLs"
+        
+        # Initialize ESPN scraper
+        self.espn_scraper = ESPNFighterScraper(
+            html_profile_dir=self.fighter_html_folder,
+            max_workers=3,
+            rate_limit=2.0,
+            max_retries=5
+        )
         
         # Temp folders (OVERWRITE)
         self.temp_folder = Path("temp")
@@ -49,6 +55,9 @@ class ESPNDataProcessor:
         self.striking_data = pd.DataFrame()
         self.fighter_profiles = pd.DataFrame()
         self.fighters_name = pd.DataFrame()
+        
+        # File paths
+        self.profiles_file = self.data_folder / "fighter_profiles.csv"
         
         self.logger.info(f"ESPN Data Processor initialized for folder: {self.data_folder}")
         self.logger.info(f"Fighter HTML folder: {self.fighter_html_folder}")
@@ -303,35 +312,39 @@ class ESPNDataProcessor:
         Process fight data with UPSERT logic
         data_type: 'clinch', 'ground', 'striking', or 'all'
         """
-        logging.info(f"Processing {data_type} data...")
+        self.logger.info(f"Processing {data_type} data...")
         
-        # Load existing data
-        existing_data = self.load_existing_data()
-        existing_df = existing_data.get(data_type, pd.DataFrame())
+        # Load existing data (already loaded in __init__)
+        # Get existing data from instance variables
+        if data_type == 'clinch':
+            existing_df = self.clinch_data
+            output_file = self.data_folder / "clinch_data_living.csv"
+        elif data_type == 'ground':
+            existing_df = self.ground_data
+            output_file = self.data_folder / "ground_data_living.csv"
+        elif data_type == 'striking':
+            existing_df = self.striking_data
+            output_file = self.data_folder / "striking_data_living.csv"
+        else:
+            self.logger.error(f"Unknown data type: {data_type}")
+            return pd.DataFrame()
         
         # TODO: Add ESPN scraping logic here
         # For now, we'll just preserve existing data
         new_df = pd.DataFrame()  # Placeholder for scraped data
         
         # Apply UPSERT logic
-        updated_df = self.upsert_data(existing_df, new_df)
+        updated_df = self._upsert_data(data_type, new_df)
         
         # Save back to data folder
-        if data_type == 'clinch':
-            output_file = self.clinch_file
-        elif data_type == 'ground':
-            output_file = self.ground_file
-        elif data_type == 'striking':
-            output_file = self.striking_file
-        
         updated_df.to_csv(output_file, index=False)
-        logging.info(f"Saved {data_type} data: {len(updated_df)} records to {output_file}")
+        self.logger.info(f"Saved {data_type} data: {len(updated_df)} records to {output_file}")
         
         return updated_df
     
     def scrape_fighter_htmls(self, fighter_names):
         """
-        Scrape HTML pages for fighters (placeholder for actual scraping logic)
+        Scrape HTML pages for fighters using improved ESPN scraper
         
         Args:
             fighter_names: List of fighter names to scrape
@@ -341,24 +354,34 @@ class ESPNDataProcessor:
         """
         logging.info(f"Scraping HTML for {len(fighter_names)} fighters...")
         
-        # TODO: Implement actual ESPN scraping logic here
-        # For now, this is a placeholder that simulates scraping
+        from espn_scraper import ESPNFighterScraper
         
+        scraper = ESPNFighterScraper()
         scraped_htmls = {}
         
-        for fighter_name in fighter_names:
-            # Simulate HTML content (replace with actual scraping)
-            html_content = f"""
-            <html>
-            <head><title>{fighter_name} - ESPN MMA</title></head>
-            <body>
-                <h1>{fighter_name}</h1>
-                <p>ESPN MMA fighter profile</p>
-                <p>Scraped at: {datetime.now().isoformat()}</p>
-            </body>
-            </html>
-            """
-            scraped_htmls[fighter_name] = html_content
+        for i, fighter_name in enumerate(fighter_names, 1):
+            try:
+                logging.info(f"Scraping {fighter_name} ({i}/{len(fighter_names)})")
+                
+                # Use the improved scraper to get fighter stats (which saves HTML)
+                fighter_data = scraper.get_fighter_stats(fighter_name)
+                
+                if fighter_data and 'html_file' in fighter_data:
+                    # Read the saved HTML file
+                    html_file_path = Path(fighter_data['html_file'])
+                    if html_file_path.exists():
+                        with open(html_file_path, 'r', encoding='utf-8') as f:
+                            html_content = f.read()
+                        scraped_htmls[fighter_name] = html_content
+                        logging.info(f"Successfully scraped HTML for {fighter_name}")
+                    else:
+                        logging.warning(f"HTML file not found for {fighter_name}")
+                else:
+                    logging.warning(f"Could not scrape {fighter_name}")
+                    
+            except Exception as e:
+                logging.error(f"Error scraping {fighter_name}: {e}")
+                continue
         
         logging.info(f"Scraped HTML for {len(scraped_htmls)} fighters")
         return scraped_htmls
@@ -367,14 +390,10 @@ class ESPNDataProcessor:
         """Process fighter HTML files with UPSERT logic"""
         logging.info("Processing fighter HTML files...")
         
-        # Load fighters list (try test file first, then fallback to full list)
-        test_fighters_file = self.data_folder / "fighter_names.csv"
+        # Load fighters list (always use full list)
         full_fighters_file = self.data_folder / "fighters_name.csv"
         
-        if test_fighters_file.exists():
-            fighters_file = test_fighters_file
-            logging.info("Using TEST fighter list (fighter_names.csv)")
-        elif full_fighters_file.exists():
+        if full_fighters_file.exists():
             fighters_file = full_fighters_file
             logging.info("Using FULL fighter list (fighters_name.csv)")
         else:
@@ -400,15 +419,13 @@ class ESPNDataProcessor:
         logging.info("Processing fighter profiles...")
         
         # Load existing data
-        existing_data = self.load_existing_data()
-        existing_df = existing_data.get('profiles', pd.DataFrame())
+        existing_df = self.fighter_profiles  # Use the already loaded data
         
-        # TODO: Add fighter profile scraping logic here
-        # For now, we'll just preserve existing data
-        new_df = pd.DataFrame()  # Placeholder for scraped data
+        # Extract profile data from stored HTML files
+        new_df = self._extract_profiles_from_html()
         
         # Apply UPSERT logic (use fighter name as key)
-        updated_df = self.upsert_data(existing_df, new_df, key_columns=['Fighter Name'])
+        updated_df = self._upsert_data('profiles', new_df)
         
         # Save back to data folder
         updated_df.to_csv(self.profiles_file, index=False)
@@ -416,59 +433,392 @@ class ESPNDataProcessor:
         
         return updated_df
     
-    def run_full_processing(self):
-        """Run full data processing pipeline"""
-        logging.info("Starting ESPN Data Processing Pipeline")
+    def _extract_profiles_from_html(self):
+        """Extract fighter profile data from stored HTML files"""
+        import json
+        import re
         
+        profiles = []
+        
+        # Get all HTML files
+        html_files = list(self.fighter_html_folder.glob("*.html"))
+        
+        for html_file in html_files:
+            try:
+                # Extract fighter name from filename
+                fighter_name = html_file.stem.replace('_', ' ')
+                
+                # Read HTML content
+                with open(html_file, 'r', encoding='utf-8') as f:
+                    html_content = f.read()
+                
+                # Skip small placeholder files
+                if len(html_content) < 10000:
+                    continue
+                
+                # Look for the complete JSON structure
+                # The data is embedded in a large JSON object
+                json_start_pattern = r'"prtlCmnApiRsp":\s*{'
+                start_match = re.search(json_start_pattern, html_content)
+                
+                if not start_match:
+                    continue
+                
+                # Find the start position (after the key)
+                start_pos = start_match.end() - 1  # Start at the opening brace
+                
+                # Find the matching closing brace by counting braces
+                brace_count = 0
+                in_string = False
+                escape_next = False
+                end_pos = start_pos
+                
+                for i, char in enumerate(html_content[start_pos:], start_pos):
+                    if escape_next:
+                        escape_next = False
+                        continue
+                    
+                    if char == '\\':
+                        escape_next = True
+                        continue
+                    
+                    if char == '"' and not escape_next:
+                        in_string = not in_string
+                        continue
+                    
+                    if not in_string:
+                        if char == '{':
+                            brace_count += 1
+                        elif char == '}':
+                            brace_count -= 1
+                            if brace_count == 0:
+                                end_pos = i + 1
+                                break
+                
+                if brace_count != 0:
+                    continue
+                
+                # Extract the JSON string (just the object part)
+                json_str = html_content[start_pos:end_pos]
+                
+                # Clean up the JSON string
+                json_str = re.sub(r'//.*?\n', '\n', json_str)  # Remove comments
+                json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas
+                
+                try:
+                    data = json.loads(json_str)
+                except json.JSONDecodeError:
+                    continue
+                
+                # Navigate to athlete data
+                if 'athlete' not in data:
+                    continue
+                
+                athlete_data = data['athlete']
+                
+                # Extract profile information
+                profile = {
+                    'Fighter Name': fighter_name,
+                    'ESPN URL': f"https://www.espn.com/mma/fighter/_/id/{athlete_data.get('id', '')}/{fighter_name.lower().replace(' ', '-')}",
+                    'Scraped At': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'Total Fights': 0,
+                    'Last Updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                }
+                
+                # Extract record from statsSummary
+                if 'statsSummary' in athlete_data and 'statistics' in athlete_data['statsSummary']:
+                    stats = athlete_data['statsSummary']['statistics']
+                    for stat in stats:
+                        if stat.get('name') == 'wins-losses-draws':
+                            record = stat.get('displayValue', '0-0-0')
+                            profile['Division Record'] = record
+                            
+                            # Parse W-L-D
+                            parts = record.split('-')
+                            if len(parts) >= 3:
+                                wins = int(parts[0]) if parts[0].isdigit() else 0
+                                losses = int(parts[1]) if parts[1].isdigit() else 0
+                                draws = int(parts[2]) if parts[2].isdigit() else 0
+                                profile['Total Fights'] = wins + losses + draws
+                                profile['Wins by Knockout'] = 0
+                                profile['Wins by Submission'] = 0
+                                profile['Wins by Decision'] = 0
+                            break
+                
+                # Extract other stats
+                if 'statsSummary' in athlete_data and 'statistics' in athlete_data['statsSummary']:
+                    stats = athlete_data['statsSummary']['statistics']
+                    for stat in stats:
+                        if stat.get('name') == 'tkos-tkoLosses':
+                            tko_record = stat.get('displayValue', '0-0')
+                            parts = tko_record.split('-')
+                            if len(parts) >= 2:
+                                profile['Wins by Knockout'] = int(parts[0]) if parts[0].isdigit() else 0
+                        elif stat.get('name') == 'submissions-submissionLosses':
+                            sub_record = stat.get('displayValue', '0-0')
+                            parts = sub_record.split('-')
+                            if len(parts) >= 2:
+                                profile['Wins by Submission'] = int(parts[0]) if parts[0].isdigit() else 0
+                
+                # Extract personal info
+                if 'displayHeight' in athlete_data:
+                    profile['Height'] = athlete_data['displayHeight']
+                if 'displayWeight' in athlete_data:
+                    profile['Weight'] = athlete_data['displayWeight']
+                if 'displayDOB' in athlete_data:
+                    profile['Age'] = athlete_data.get('age', '')
+                if 'displayReach' in athlete_data:
+                    profile['Reach'] = athlete_data['displayReach']
+                if 'stance' in athlete_data and 'text' in athlete_data['stance']:
+                    profile['Stance'] = athlete_data['stance']['text']
+                if 'weightClass' in athlete_data and 'text' in athlete_data['weightClass']:
+                    profile['Division'] = athlete_data['weightClass']['text']
+                if 'citizenship' in athlete_data:
+                    profile['Country'] = athlete_data['citizenship']
+                if 'association' in athlete_data and 'name' in athlete_data['association']:
+                    profile['Team'] = athlete_data['association']['name']
+                
+                profiles.append(profile)
+                
+            except Exception as e:
+                self.logger.warning(f"Error processing {html_file.name}: {e}")
+                continue
+        
+        return pd.DataFrame(profiles)
+    
+    def _parse_fighter_profile(self, soup: BeautifulSoup, fighter_name: str) -> dict:
+        """Parse fighter profile data from HTML soup"""
         try:
-            # Get fighter names to scrape
-            if len(self.fighters_name) == 0:
-                self.logger.warning("No fighters list available, using sample data")
-                fighter_names = ['Robert Whittaker', 'Israel Adesanya', 'Alex Pereira']
-            else:
-                fighter_names = self.fighters_name['fighters'].tolist()
+            profile = {
+                'Name': fighter_name,
+                'Division Title': '',
+                'Division Record': '',
+                'Wins by Knockout': 0,
+                'Wins by Submission': 0,
+                'First Round Finishes': 0,
+                'Wins by Decision': 0,
+                'Striking accuracy': '',
+                'Sig. Strikes Landed': 0,
+                'Sig. Strikes Attempted': 0,
+                'Takedown Accuracy': '',
+                'Takedowns Landed': 0,
+                'Takedowns Attempted': 0,
+                'Sig. Str. Landed Per Min': 0,
+                'Sig. Str. Absorbed Per Min': 0,
+                'Takedown avg Per 15 Min': 0,
+                'Submission avg Per 15 Min': 0,
+                'Sig. Str. Defense': '',
+                'Takedown Defense': '',
+                'Knockdown Avg': 0,
+                'Average fight time': '',
+                'Sig. Str. By Position - Standing': '',
+                'Sig. Str. By Position - Clinch': '',
+                'Sig. Str. By Position - Ground': '',
+                'Win by Method - KO/TKO': '',
+                'Win by Method - DEC': '',
+                'Win by Method - SUB': '',
+                'Sig. Str. by target - Head Strike Percentage': '',
+                'Sig. Str. by target - Head Strike Count': 0,
+                'Sig. Str. by target - Body Strike Percentage': '',
+                'Sig. Str. by target - Body Strike Count': 0,
+                'Sig. Str. by target - Leg Strike Percentage': '',
+                'Sig. Str. by target - Leg Strike Count': 0,
+                'Event_1_Headline': '',
+                'Event_1_Date': '',
+                'Event_1_Round': '',
+                'Event_1_Time': '',
+                'Event_1_Method': '',
+                'Event_2_Headline': '',
+                'Event_2_Date': '',
+                'Event_2_Round': '',
+                'Event_2_Time': '',
+                'Event_2_Method': '',
+                'Event_3_Headline': '',
+                'Event_3_Date': '',
+                'Event_3_Round': '',
+                'Event_3_Time': '',
+                'Event_3_Method': '',
+                'Status': 'Active',
+                'Place_of_Birth': '',
+                'Fighting_style': '',
+                'Age': 0,
+                'Height': 0,
+                'Weight': 0,
+                'Octagon_Debut': '',
+                'Reach': 0,
+                'Leg_reach': 0,
+                'Trains_at': '',
+                'Fight Win Streak': '',
+                'Title Defenses': '',
+                'Former Champion': ''
+            }
             
-            # Process fighter HTMLs (UPSERT policy)
-            self.process_fighter_htmls()
+            # Look for record information
+            record_patterns = [
+                r'Record:\s*(\d+)-(\d+)-(\d+)',  # "Record: X-Y-Z"
+                r'(\d+)-(\d+)-(\d+)\s*\(W-L-D\)',  # "X-Y-Z (W-L-D)"
+                r'(\d+)-(\d+)-(\d+)\s*record',  # "X-Y-Z record"
+                r'(\d+)\s*wins.*?(\d+)\s*losses.*?(\d+)\s*draws',  # "X wins, Y losses, Z draws"
+                r'(\d+)\s*wins.*?(\d+)\s*losses',  # "X wins, Y losses"
+            ]
             
-            # Process main outputs (UPSERT policy)
-            self.process_fight_data('clinch')
-            self.process_fight_data('ground')
-            self.process_fight_data('striking')
-            self.process_fighter_profiles()
+            page_text = soup.get_text()
             
-            # Process each data type
-            if data_type in ['clinch', 'all']:
-                self._upsert_data('clinch', scraped_data['clinch'])
+            # Try to find record
+            for pattern in record_patterns:
+                import re
+                match = re.search(pattern, page_text, re.IGNORECASE)
+                if match:
+                    if len(match.groups()) == 3:
+                        wins, losses, draws = match.groups()
+                        # Validate that these look like reasonable fight record numbers
+                        if (0 <= int(wins) <= 50 and 0 <= int(losses) <= 50 and 0 <= int(draws) <= 10):
+                            profile['Division Record'] = f"{wins}-{losses}-{draws} (W-L-D)"
+                            break
+                    elif len(match.groups()) == 2:
+                        wins, losses = match.groups()
+                        # Validate that these look like reasonable fight record numbers
+                        if (0 <= int(wins) <= 50 and 0 <= int(losses) <= 50):
+                            profile['Division Record'] = f"{wins}-{losses}-0 (W-L-D)"
+                            break
             
-            if data_type in ['ground', 'all']:
-                self._upsert_data('ground', scraped_data['ground'])
+            # Look for division information
+            division_patterns = [
+                r'(\w+weight)\s*Division',
+                r'Division:\s*(\w+weight)',
+                r'(\w+weight)\s*class'
+            ]
             
-            if data_type in ['striking', 'all']:
-                self._upsert_data('striking', scraped_data['striking'])
+            for pattern in division_patterns:
+                match = re.search(pattern, page_text, re.IGNORECASE)
+                if match:
+                    profile['Division Title'] = f"{match.group(1).title()} Division"
+                    break
             
-            if data_type in ['profiles', 'all']:
-                self._upsert_data('profiles', scraped_data['profiles'])
+            # Look for fight statistics
+            stats_patterns = {
+                'Wins by Knockout': r'(\d+)\s*KO|(\d+)\s*knockout',
+                'Wins by Submission': r'(\d+)\s*submission|(\d+)\s*SUB',
+                'Wins by Decision': r'(\d+)\s*decision|(\d+)\s*DEC',
+                'Age': r'Age:\s*(\d+)',
+                'Height': r'Height:\s*(\d+)',
+                'Weight': r'Weight:\s*(\d+)',
+                'Reach': r'Reach:\s*(\d+)',
+            }
             
-            self.logger.info(f"Completed processing {data_type} data")
+            for field, pattern in stats_patterns.items():
+                match = re.search(pattern, page_text, re.IGNORECASE)
+                if match:
+                    try:
+                        value = int(match.group(1) or match.group(2))
+                        profile[field] = value
+                    except (ValueError, IndexError):
+                        continue
+            
+            # Look for recent fight history
+            fight_history = self._extract_recent_fights(soup)
+            if fight_history:
+                for i, fight in enumerate(fight_history[:3], 1):
+                    profile[f'Event_{i}_Headline'] = fight.get('headline', '')
+                    profile[f'Event_{i}_Date'] = fight.get('date', '')
+                    profile[f'Event_{i}_Round'] = fight.get('round', '')
+                    profile[f'Event_{i}_Time'] = fight.get('time', '')
+                    profile[f'Event_{i}_Method'] = fight.get('method', '')
+            
+            return profile
             
         except Exception as e:
-            self.logger.error(f"Error processing fight data: {e}")
+            logging.error(f"Error parsing profile for {fighter_name}: {e}")
+            return None
+    
+    def _extract_recent_fights(self, soup: BeautifulSoup) -> list:
+        """Extract recent fight history from HTML"""
+        fights = []
+        try:
+            # Look for fight history tables or sections
+            fight_sections = soup.find_all(['table', 'div'], class_=lambda x: x and 'fight' in x.lower())
+            
+            for section in fight_sections:
+                rows = section.find_all('tr')
+                for row in rows:
+                    cells = row.find_all(['td', 'th'])
+                    if len(cells) >= 4:
+                        fight = {
+                            'headline': cells[0].get_text().strip() if len(cells) > 0 else '',
+                            'date': cells[1].get_text().strip() if len(cells) > 1 else '',
+                            'round': cells[2].get_text().strip() if len(cells) > 2 else '',
+                            'time': cells[3].get_text().strip() if len(cells) > 3 else '',
+                            'method': cells[4].get_text().strip() if len(cells) > 4 else ''
+                        }
+                        fights.append(fight)
+            
+            return fights[:3]  # Return only 3 most recent fights
+            
+        except Exception as e:
+            logging.error(f"Error extracting fight history: {e}")
+            return []
+    
+    def run_full_processing(self):
+        """Run complete data processing pipeline"""
+        try:
+            self.logger.info("Starting full ESPN data processing pipeline")
+            
+            # Get fighter names to scrape
+            fighter_names = self.fighters_name['fighters'].tolist()
+            self.logger.info(f"Scraping data for {len(fighter_names)} fighters")
+            
+            # Scrape fighter HTML files first
+            self.logger.info("Scraping fighter HTML files...")
+            new_html_files = self.scrape_fighter_htmls(fighter_names)
+            self.upsert_html_files(new_html_files)
+            
+            # Scrape fighter data from ESPN
+            scraped_data = self.scrape_fighter_data(fighter_names)
+            
+            # Apply UPSERT logic for each data type
+            if 'clinch' in scraped_data:
+                self._upsert_data('clinch', scraped_data['clinch'])
+            
+            if 'ground' in scraped_data:
+                self._upsert_data('ground', scraped_data['ground'])
+            
+            if 'striking' in scraped_data:
+                self._upsert_data('striking', scraped_data['striking'])
+            
+            if 'profiles' in scraped_data:
+                self._upsert_data('profiles', scraped_data['profiles'])
+            
+            # Save processed data
+            self.save_data()
+            
+            # Clean temp folders
+            self.clean_temp_folders()
+            
+            # Get summary
+            summary = self.get_data_summary()
+            
+            self.logger.info("Full processing pipeline completed successfully")
+            return summary
+            
+        except Exception as e:
+            self.logger.error(f"Error in full processing pipeline: {e}")
+            return None
     
     def _upsert_data(self, data_type: str, new_df: pd.DataFrame):
         """Apply UPSERT logic to merge new data with existing data"""
         try:
-            if new_df.empty:
-                self.logger.warning(f"No new {data_type} data to process")
-                return
-            
             # Get existing data
             existing_df = getattr(self, f"{data_type}_data", pd.DataFrame())
+            
+            if new_df.empty:
+                self.logger.warning(f"No new {data_type} data to process")
+                return existing_df  # Return existing data if no new data
             
             if existing_df.empty:
                 # No existing data, use new data as is
                 setattr(self, f"{data_type}_data", new_df)
                 self.logger.info(f"UPSERT: No existing {data_type} data, using {len(new_df)} new records")
+                return new_df
             else:
                 # Merge with existing data using composite key
                 if data_type in ['clinch', 'ground', 'striking']:
@@ -486,9 +836,11 @@ class ESPNDataProcessor:
                 
                 setattr(self, f"{data_type}_data", combined_df)
                 self.logger.info(f"UPSERT: Merged {len(new_df)} new {data_type} records with {len(existing_df)} existing records")
+                return combined_df
             
         except Exception as e:
             self.logger.error(f"Error in UPSERT for {data_type}: {e}")
+            return existing_df  # Return existing data on error
     
     def save_data(self):
         """Save all processed data to CSV files"""
@@ -579,18 +931,13 @@ class ESPNDataProcessor:
             self.logger.error(f"Error cleaning temp folders: {e}")
     
     def get_data_summary(self):
-        """Get summary of current main output data"""
-        data = self.load_existing_data()
-        
-        # Count HTML files
-        html_count = len(self.get_existing_html_files())
-        
+        """Get summary of all data"""
         summary = {
-            'clinch_records': len(data.get('clinch', pd.DataFrame())),
-            'ground_records': len(data.get('ground', pd.DataFrame())),
-            'striking_records': len(data.get('striking', pd.DataFrame())),
-            'fighter_profiles': len(data.get('profiles', pd.DataFrame())),
-            'fighter_html_files': html_count
+            'clinch_records': len(self.clinch_data),
+            'ground_records': len(self.ground_data),
+            'striking_records': len(self.striking_data),
+            'fighters': len(self.fighters_name),
+            'profiles': len(self.fighter_profiles)
         }
         
         self.logger.info("Data Summary:")
@@ -598,30 +945,6 @@ class ESPNDataProcessor:
             self.logger.info(f"  {key}: {value}")
         
         return summary
-    
-    def run_full_processing(self):
-        """Run complete data processing pipeline"""
-        try:
-            self.logger.info("Starting full ESPN data processing pipeline")
-            
-            # Process all data types
-            self.process_fight_data('all')
-            
-            # Save processed data
-            self.save_data()
-            
-            # Clean temp folders
-            self.clean_temp_folders()
-            
-            # Get summary
-            summary = self.get_data_summary()
-            
-            self.logger.info("Full processing pipeline completed successfully")
-            return summary
-            
-        except Exception as e:
-            self.logger.error(f"Error in full processing pipeline: {e}")
-            return None
 
 
 def main():

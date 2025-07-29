@@ -44,15 +44,15 @@ def main():
     
     logger = logging.getLogger(__name__)
     
-    print("🚀 ESPN MMA Data Processor")
+    print("ESPN MMA Data Processor")
     print("=" * 50)
-    print(f"📊 Data Type: {args.data_type}")
-    print(f"🧪 Test Mode: {args.test_mode}")
-    print(f"⏱️  Delay: {args.delay}s")
-    print(f"🔍 Verbose: {args.verbose}")
+    print(f"Data Type: {args.data_type}")
+    print(f"Test Mode: {args.test_mode}")
+    print(f"Delay: {args.delay}s")
+    print(f"Verbose: {args.verbose}")
     
     if args.fighters:
-        print(f"👥 Custom Fighters: {', '.join(args.fighters)}")
+        print(f"Custom Fighters: {', '.join(args.fighters)}")
     
     print("=" * 50)
     
@@ -61,7 +61,7 @@ def main():
         processor = ESPNDataProcessor()
         
         if args.test_mode:
-            logger.info("🧪 Running in TEST MODE with sample data")
+            logger.info("Running in TEST MODE with sample data")
             
             # Use sample data instead of real scraping
             from espn_scraper import create_sample_fighter_data
@@ -151,10 +151,10 @@ def main():
             if args.data_type in ['profiles', 'all']:
                 processor._upsert_data('profiles', sample_profiles_df)
             
-            logger.info("✅ Test mode processing completed")
+            logger.info("Test mode processing completed")
             
         else:
-            logger.info("🌐 Running with REAL ESPN scraping")
+            logger.info("Running with REAL ESPN scraping")
             
             # Override fighter list if specified
             if args.fighters:
@@ -165,9 +165,9 @@ def main():
             summary = processor.run_full_processing()
             
             if summary:
-                logger.info("✅ Real scraping processing completed")
+                logger.info("Real scraping processing completed")
             else:
-                logger.error("❌ Real scraping processing failed")
+                logger.error("Real scraping processing failed")
                 return 1
         
         # Save data
@@ -180,18 +180,18 @@ def main():
         final_summary = processor.get_data_summary()
         
         print("\n" + "=" * 50)
-        print("🎉 ESPN Data Processing Completed!")
+        print("ESPN Data Processing Completed!")
         print("=" * 50)
-        print("📊 Final Data Summary:")
+        print("Final Data Summary:")
         for key, value in final_summary.items():
             print(f"   {key}: {value}")
         
-        print("\n📁 Output Files:")
+        print("\nOutput Files:")
         data_folder = Path("data")
         for file_path in data_folder.glob("*.csv"):
-            print(f"   📄 {file_path.name}")
+            print(f"   {file_path.name}")
         
-        print("\n✅ Processing completed successfully!")
+        print("\nProcessing completed successfully!")
         return 0
         
     except KeyboardInterrupt:
