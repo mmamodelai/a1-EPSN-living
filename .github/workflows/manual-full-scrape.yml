@@ -22,11 +22,64 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
         
+    - name: Verify fighters list
+      run: |
+        echo "🔍 Checking fighters list..."
+        if [ -f "data/fighters_name.csv" ]; then
+          echo "✅ Found fighters_name.csv"
+          echo "📊 Fighter count: $(wc -l < data/fighters_name.csv) fighters"
+          head -5 data/fighters_name.csv
+        else
+          echo "❌ fighters_name.csv not found - please run pull-fighters-list workflow first"
+          exit 1
+        fi
+        
     - name: Run Full ESPN Scrape
       run: |
-        echo "Starting Full ESPN Scrape at $(date)"
-        python run_espn_processor.py --full-scrape || echo "Full scrape failed but continuing..."
-        echo "Full ESPN Scrape completed at $(date)"
+        echo "🚀 Starting Full ESPN Scrape at $(date)"
+        echo "📋 This will scrape:"
+        echo "   ✅ Fighter Profiles (basic info, records, stats)"
+        echo "   ✅ Clinch Data (clinch striking, grappling)"
+        echo "   ✅ Ground Data (ground fighting stats)"
+        echo "   ✅ Striking Data (distance striking stats)"
+        echo "   ✅ HTML Files (complete ESPN pages)"
+        echo ""
+        
+        python run_espn_processor.py --full-scrape
+        
+        echo "✅ Full ESPN Scrape completed at $(date)"
+        
+    - name: Verify output files
+      run: |
+        echo "🔍 Verifying output files..."
+        echo ""
+        
+        # Check HTML files
+        if [ -d "data/FighterHTMLs" ]; then
+          html_count=$(find data/FighterHTMLs -name "*.html" | wc -l)
+          echo "📁 HTML files: $html_count"
+          
+          # Check for small files
+          small_files=$(find data/FighterHTMLs -name "*.html" -size -5k | wc -l)
+          if [ $small_files -eq 0 ]; then
+            echo "✅ No small HTML files (<5KB) found"
+          else
+            echo "⚠️  Found $small_files small HTML files (<5KB)"
+          fi
+        else
+          echo "❌ FighterHTMLs directory not found"
+        fi
+        
+        # Check CSV files
+        echo ""
+        echo "📊 CSV Output Files:"
+        for file in data/*.csv; do
+          if [ -f "$file" ]; then
+            size=$(ls -lh "$file" | awk '{print $5}')
+            lines=$(wc -l < "$file")
+            echo "   $(basename "$file"): $lines lines ($size)"
+          fi
+        done
         
     - name: Check for changes
       id: check_changes
@@ -34,8 +87,10 @@ jobs:
         git add .
         if git diff --staged --quiet; then
           echo "no_changes=true" >> $GITHUB_OUTPUT
+          echo "No changes detected"
         else
           echo "no_changes=false" >> $GITHUB_OUTPUT
+          echo "Changes detected - will commit"
         fi
         
     - name: Commit and push changes
@@ -43,10 +98,19 @@ jobs:
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git commit -m "Full ESPN scrape - $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        git commit -m "Full ESPN scrape with all data types - $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
         git push
         
     - name: No changes notification
       if: steps.check_changes.outputs.no_changes == 'true'
       run: |
-        echo "No changes detected - data is up to date" 
+        echo "✅ No changes detected - data is up to date"
+        
+    - name: Summary
+      run: |
+        echo ""
+        echo "🎯 ESPN Scrape Summary:"
+        echo "📁 Repository: A1-ESPN-Profiles"
+        echo "📋 Data Types: Profiles, Clinch, Ground, Striking, HTML"
+        echo "⏰ Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "✅ Pipeline: Complete" 
