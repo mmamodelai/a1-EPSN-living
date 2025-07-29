@@ -318,7 +318,7 @@ class ESPNDataProcessor:
     
     def get_data_summary(self):
         """Get summary of current main output data"""
-        data = self._load_existing_data()
+        data = self.load_existing_data()
         
         # Count HTML files
         html_count = len(self.get_existing_html_files())
