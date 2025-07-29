@@ -33,9 +33,13 @@ class FinalESPNProcessor:
             'Last Fight Opponent', 'Last Fight Result', 'Last Fight Method', 'Last Fight Round', 'Last Fight Time'
         ]
         
-    def load_fighters_list(self) -> List[str]:
-        """Load list of fighters from fighters_name.csv"""
-        fighters_file = self.data_folder / "fighters_name.csv"
+    def load_fighters_list(self, test_mode: bool = False) -> List[str]:
+        """Load list of fighters from CSV file"""
+        if test_mode:
+            fighters_file = self.data_folder / "test_fighters_list.csv"
+        else:
+            fighters_file = self.data_folder / "fighters_name.csv"
+            
         if not fighters_file.exists():
             print(f"Fighters file not found: {fighters_file}")
             return []
@@ -343,9 +347,9 @@ class FinalESPNProcessor:
             print(f"Error processing {fighter_name}: {e}")
             return {'Fighter Name': fighter_name}
     
-    def process_all_fighters(self) -> pd.DataFrame:
+    def process_all_fighters(self, test_mode: bool = False) -> pd.DataFrame:
         """Process all fighters and return comprehensive DataFrame"""
-        fighters = self.load_fighters_list()
+        fighters = self.load_fighters_list(test_mode)
         
         if not fighters:
             print("No fighters found to process")
@@ -368,7 +372,7 @@ class FinalESPNProcessor:
             all_data.append(fighter_data)
             processed_count += 1
             
-            if processed_count % 50 == 0:
+            if processed_count % 10 == 0:
                 print(f"Processed {processed_count}/{len(fighters)} fighters...")
         
         # Create DataFrame
@@ -386,17 +390,26 @@ class FinalESPNProcessor:
 
 def main():
     """Main function to run the final ESPN processor"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Final ESPN Data Processor')
+    parser.add_argument('--test', action='store_true', help='Run in test mode with smaller fighter list')
+    args = parser.parse_args()
+    
     processor = FinalESPNProcessor()
     
     print("Starting final ESPN data processing...")
+    if args.test:
+        print("Running in TEST MODE with smaller fighter list...")
     print("Extracting ALL detailed fight statistics using MOST RECENT fights...")
     
     # Process all fighters
-    df = processor.process_all_fighters()
+    df = processor.process_all_fighters(test_mode=args.test)
     
     if not df.empty:
         # Save final CSV
-        output_file = processor.save_final_csv(df)
+        output_file = "test_fighter_profiles.csv" if args.test else "fighter_profiles.csv"
+        output_file = processor.save_final_csv(df, output_file)
         print(f"Final processing complete!")
         print(f"Output file: {output_file}")
         print(f"Total fighters processed: {len(df)}")
