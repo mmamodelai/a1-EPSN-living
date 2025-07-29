@@ -50,14 +50,55 @@ jobs:
         
     - name: Run ESPN Data Processor
       run: |
-        echo "Starting ESPN Data Processor at $(date)"
-        python run_espn_processor.py || echo "Processor failed but continuing..."
-        echo "ESPN Data Processor completed at $(date)"
+        echo "🚀 Starting Weekly ESPN Data Update at $(date)"
+        echo "📋 This will scrape:"
+        echo "   ✅ Fighter Profiles (basic info, records, stats)"
+        echo "   ✅ Clinch Data (clinch striking, grappling)"
+        echo "   ✅ Ground Data (ground fighting stats)"
+        echo "   ✅ Striking Data (distance striking stats)"
+        echo "   ✅ HTML Files (complete ESPN pages)"
+        echo ""
+        
+        python run_espn_processor.py --data-type all
+        
+        echo "✅ Weekly ESPN Data Update completed at $(date)"
         
     - name: Show Data Summary
       run: |
-        echo "Current Data Summary:"
+        echo "📊 Final Data Summary:"
         python -c "import sys; sys.path.append('src'); from espn_data_processor import ESPNDataProcessor; processor = ESPNDataProcessor(); summary = processor.get_data_summary(); [print(f'  {key}: {value}') for key, value in summary.items()]"
+        
+    - name: Verify output files
+      run: |
+        echo "🔍 Verifying output files..."
+        echo ""
+        
+        # Check HTML files
+        if [ -d "data/FighterHTMLs" ]; then
+          html_count=$(find data/FighterHTMLs -name "*.html" | wc -l)
+          echo "📁 HTML files: $html_count"
+          
+          # Check for small files
+          small_files=$(find data/FighterHTMLs -name "*.html" -size -5k | wc -l)
+          if [ $small_files -eq 0 ]; then
+            echo "✅ No small HTML files (<5KB) found"
+          else
+            echo "⚠️  Found $small_files small HTML files (<5KB)"
+          fi
+        else
+          echo "❌ FighterHTMLs directory not found"
+        fi
+        
+        # Check CSV files
+        echo ""
+        echo "📊 CSV Output Files:"
+        for file in data/*.csv; do
+          if [ -f "$file" ]; then
+            size=$(ls -lh "$file" | awk '{print $5}')
+            lines=$(wc -l < "$file")
+            echo "   $(basename "$file"): $lines lines ($size)"
+          fi
+        done
         
     - name: Check for changes
       id: check_changes
@@ -74,10 +115,20 @@ jobs:
       run: |
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
-        git commit -m "Weekly ESPN data update - $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        git commit -m "Weekly ESPN data update with all data types - $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
         git push
         
     - name: No changes notification
       if: steps.check_changes.outputs.no_changes == 'true'
       run: |
-        echo "No changes detected - data is up to date" 
+        echo "✅ No changes detected - data is up to date"
+        
+    - name: Summary
+      run: |
+        echo ""
+        echo "🎯 Weekly ESPN Update Summary:"
+        echo "📁 Repository: A1-ESPN-Profiles"
+        echo "📋 Data Types: Profiles, Clinch, Ground, Striking, HTML"
+        echo "⏰ Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "🔄 Next Update: Sunday 2 PM UTC"
+        echo "✅ Pipeline: Complete" 

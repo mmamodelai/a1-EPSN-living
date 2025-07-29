@@ -23,7 +23,7 @@ def test_data_processor():
     
     # Test 1: Load existing data
     print("\n1. Testing data loading...")
-    data = processor.load_existing_data()
+    data = processor._load_existing_data()
     
     for data_type, df in data.items():
         print(f"   {data_type}: {len(df)} records")
