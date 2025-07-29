@@ -51,15 +51,13 @@ jobs:
     - name: Run ESPN Data Processor
       run: |
         echo "🚀 Starting Weekly ESPN Data Update at $(date)"
+        echo "🧪 TEST MODE: Processing 24 fighters for faster troubleshooting"
         echo "📋 This will scrape:"
         echo "   ✅ Fighter Profiles (basic info, records, stats)"
-        echo "   ✅ Clinch Data (clinch striking, grappling)"
-        echo "   ✅ Ground Data (ground fighting stats)"
-        echo "   ✅ Striking Data (distance striking stats)"
-        echo "   ✅ HTML Files (complete ESPN pages)"
+        echo "   ✅ Test mode with reduced load"
         echo ""
         
-        python run_espn_processor.py --data-type all
+        python final_espn_processor.py --test
         
         echo "✅ Weekly ESPN Data Update completed at $(date)"
         

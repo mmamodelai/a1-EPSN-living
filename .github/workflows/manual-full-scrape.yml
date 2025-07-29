@@ -1,6 +1,12 @@
 name: Manual Full ESPN Scrape
 on:
-  workflow_dispatch:  # Manual only
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Run in test mode with 24 fighters (faster)'
+        required: false
+        default: true
+        type: boolean
 
 jobs:
   full-espn-scrape:
@@ -25,29 +31,51 @@ jobs:
     - name: Verify fighters list
       run: |
         echo "🔍 Checking fighters list..."
-        if [ -f "data/fighters_name.csv" ]; then
-          echo "✅ Found fighters_name.csv"
-          echo "📊 Fighter count: $(wc -l < data/fighters_name.csv) fighters"
-          head -5 data/fighters_name.csv
+        if [ "${{ github.event.inputs.test_mode }}" = "true" ]; then
+          echo "🧪 TEST MODE: Using test_fighters_list.csv (24 fighters)"
+          if [ -f "data/test_fighters_list.csv" ]; then
+            echo "✅ Found test_fighters_list.csv"
+            echo "📊 Fighter count: $(wc -l < data/test_fighters_list.csv) fighters"
+            head -5 data/test_fighters_list.csv
+          else
+            echo "❌ test_fighters_list.csv not found"
+            exit 1
+          fi
         else
-          echo "❌ fighters_name.csv not found - please run pull-fighters-list workflow first"
-          exit 1
+          echo "🚀 FULL MODE: Using fighters_name.csv (621 fighters)"
+          if [ -f "data/fighters_name.csv" ]; then
+            echo "✅ Found fighters_name.csv"
+            echo "📊 Fighter count: $(wc -l < data/fighters_name.csv) fighters"
+            head -5 data/fighters_name.csv
+          else
+            echo "❌ fighters_name.csv not found - please run pull-fighters-list workflow first"
+            exit 1
+          fi
         fi
         
-    - name: Run Full ESPN Scrape
+    - name: Run ESPN Scrape
       run: |
-        echo "🚀 Starting Full ESPN Scrape at $(date)"
-        echo "📋 This will scrape:"
-        echo "   ✅ Fighter Profiles (basic info, records, stats)"
-        echo "   ✅ Clinch Data (clinch striking, grappling)"
-        echo "   ✅ Ground Data (ground fighting stats)"
-        echo "   ✅ Striking Data (distance striking stats)"
-        echo "   ✅ HTML Files (complete ESPN pages)"
-        echo ""
+        echo "🚀 Starting ESPN Scrape at $(date)"
+        if [ "${{ github.event.inputs.test_mode }}" = "true" ]; then
+          echo "🧪 TEST MODE: Processing 24 fighters for faster troubleshooting"
+          echo "📋 This will scrape:"
+          echo "   ✅ Fighter Profiles (basic info, records, stats)"
+          echo "   ✅ Test mode with reduced load"
+          echo ""
+          python final_espn_processor.py --test
+        else
+          echo "🚀 FULL MODE: Processing all 621 fighters"
+          echo "📋 This will scrape:"
+          echo "   ✅ Fighter Profiles (basic info, records, stats)"
+          echo "   ✅ Clinch Data (clinch striking, grappling)"
+          echo "   ✅ Ground Data (ground fighting stats)"
+          echo "   ✅ Striking Data (distance striking stats)"
+          echo "   ✅ HTML Files (complete ESPN pages)"
+          echo ""
+          python run_espn_processor.py --data-type all
+        fi
         
-        python run_espn_processor.py --data-type all
-        
-        echo "✅ Full ESPN Scrape completed at $(date)"
+        echo "✅ ESPN Scrape completed at $(date)"
         
     - name: Verify output files
       run: |
