@@ -104,9 +104,26 @@ class ESPNDataProcessor:
                 self.logger.info(f"Loaded fighters data: {len(self.fighters_name)} records")
             else:
                 self.logger.info("No existing fighters list found")
+            
+            # Return dictionary of loaded data
+            return {
+                'clinch': self.clinch_data,
+                'ground': self.ground_data,
+                'striking': self.striking_data,
+                'profiles': self.fighter_profiles,
+                'fighters': self.fighters_name
+            }
                 
         except Exception as e:
             self.logger.error(f"Error loading existing data: {e}")
+            # Return empty DataFrames on error
+            return {
+                'clinch': pd.DataFrame(),
+                'ground': pd.DataFrame(),
+                'striking': pd.DataFrame(),
+                'profiles': pd.DataFrame(),
+                'fighters': pd.DataFrame()
+            }
     
     def clean_temp_folders(self):
         """Clean and recreate temp folders (OVERWRITE policy)"""
