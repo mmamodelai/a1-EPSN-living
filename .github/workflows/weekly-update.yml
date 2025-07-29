@@ -14,6 +14,30 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
       
+    - name: Ensure latest fighters list
+      run: |
+        echo "Ensuring fighters_name.csv is up to date..."
+        
+        # Check if we need to pull from A0-roosterwatch
+        if [ ! -f "data/fighters_name.csv" ] || [ $(find "data/fighters_name.csv" -mtime +1 2>/dev/null | wc -l) -gt 0 ]; then
+          echo "fighters_name.csv is missing or outdated, pulling from A0-roosterwatch..."
+          
+          # Checkout A0-roosterwatch temporarily
+          git clone --depth 1 https://github.com/mmamodelai/A0-roosterwatch.git temp-a0
+          
+          if [ -f "temp-a0/A0 optional activefighters/data/fighters_name.csv" ]; then
+            cp "temp-a0/A0 optional activefighters/data/fighters_name.csv" "data/fighters_name.csv"
+            echo "✅ Updated fighters_name.csv from A0-roosterwatch"
+          else
+            echo "⚠️  Could not find fighters_name.csv in A0-roosterwatch, using existing"
+          fi
+          
+          # Clean up
+          rm -rf temp-a0
+        else
+          echo "✅ fighters_name.csv is up to date"
+        fi
+      
     - name: Set up Python
       uses: actions/setup-python@v4
       with:

@@ -26,4 +26,7 @@ Thumbs.db
 
 # Temp folders (overwritten each run)
 temp/
-html_cache/ 
+html_cache/
+
+# Keep FighterHTMLs folder in GitHub (UPSERT policy)
+!data/FighterHTMLs/ 
