@@ -73,9 +73,14 @@ class FinalESPNProcessor:
                     
                     # Find the JSON object containing the fighter data
                     # Look for the pattern that contains the fighter statistics
-                    json_match = re.search(r'window\.__INITIAL_STATE__\s*=\s*({.*?});', script_text, re.DOTALL)
+                    # The data is embedded in the HTML, not in window.__INITIAL_STATE__
+                    
+                    # Try to find the JSON structure that contains the fighter data
+                    # This regex attempts to find the prtlCmnApiRsp object
+                    json_match = re.search(r'("prtlCmnApiRsp":{.*?})', script_text, re.DOTALL)
                     if json_match:
-                        json_str = json_match.group(1)
+                        # Wrap it in curly braces to make it a valid JSON object
+                        json_str = "{" + json_match.group(1) + "}"
                         return json.loads(json_str)
                     
             print("No JSON data found in HTML")
@@ -94,11 +99,14 @@ class FinalESPNProcessor:
             # Extract fight history with detailed statistics
             fights = self._extract_fight_history_from_html(html_content)
             
+            # Extract detailed statistics from JSON
+            detailed_stats = self._extract_detailed_stats_from_json(html_content)
+            
             # Calculate derived statistics
             stats = self._calculate_fighter_stats(fights)
             
             # Combine all data
-            result = {**profile, **stats}
+            result = {**profile, **detailed_stats, **stats}
             
             # Add fight history columns (most recent fights first)
             result.update(self._create_fight_history_columns(fights))
@@ -169,6 +177,114 @@ class FinalESPNProcessor:
         except Exception as e:
             print(f"Error extracting profile info: {e}")
             return {'Fighter Name': fighter_name}
+    
+    def _extract_detailed_stats_from_json(self, html_content: str) -> Dict:
+        """Extract detailed fight statistics from ESPN JSON data"""
+        try:
+            # Initialize stats dictionary
+            stats = {
+                'Striking Accuracy': '',
+                'Sig. Strikes Landed': '',
+                'Sig. Strikes Attempted': '',
+                'Sig. Strikes Landed Per Min': '',
+                'Sig. Strikes Absorbed Per Min': '',
+                'Takedown Accuracy': '',
+                'Takedowns Landed': '',
+                'Takedowns Attempted': '',
+                'Takedown avg Per 15 Min': '',
+                'Submission avg Per 15 Min': '',
+                'Sig. Str. Defense': '',
+                'Takedown Defense': '',
+                'Knockdown Avg': ''
+            }
+            
+            # Extract detailed stats directly from HTML patterns
+            # These are embedded in the HTML structure
+            try:
+                # Calculate averages from fight-by-fight data
+                # Look for the fight statistics table data
+                
+                # Extract significant strikes landed and attempted from fight data
+                ssl_matches = re.findall(r'"SSL","ttl":"Significant Strikes Landed".*?"data":"([^"]+)"', html_content)
+                ssa_matches = re.findall(r'"SSA","ttl":"Significant Strikes Attempts".*?"data":"([^"]+)"', html_content)
+                
+                if ssl_matches and ssa_matches:
+                    # Calculate total significant strikes landed and attempted
+                    total_ssl = sum(int(x) for x in ssl_matches if x.isdigit())
+                    total_ssa = sum(int(x) for x in ssa_matches if x.isdigit())
+                    
+                    if total_ssa > 0:
+                        striking_accuracy = (total_ssl / total_ssa) * 100
+                        stats['Striking Accuracy'] = f"{striking_accuracy:.1f}%"
+                    
+                    stats['Sig. Strikes Landed'] = str(total_ssl)
+                    stats['Sig. Strikes Attempted'] = str(total_ssa)
+                
+                # Extract takedowns landed and attempted
+                tdl_matches = re.findall(r'"TDL","ttl":"Takedowns Landed".*?"data":"([^"]+)"', html_content)
+                tda_matches = re.findall(r'"TDA","ttl":"Takedowns Attempted".*?"data":"([^"]+)"', html_content)
+                
+                if tdl_matches and tda_matches:
+                    total_tdl = sum(int(x) for x in tdl_matches if x.isdigit())
+                    total_tda = sum(int(x) for x in tda_matches if x.isdigit())
+                    
+                    if total_tda > 0:
+                        takedown_accuracy = (total_tdl / total_tda) * 100
+                        stats['Takedown Accuracy'] = f"{takedown_accuracy:.1f}%"
+                    
+                    stats['Takedowns Landed'] = str(total_tdl)
+                    stats['Takedowns Attempted'] = str(total_tda)
+                
+                # Extract knockdowns
+                kd_matches = re.findall(r'"KD","ttl":"Knockdowns".*?"data":"([^"]+)"', html_content)
+                if kd_matches:
+                    total_kd = sum(int(x) for x in kd_matches if x.isdigit())
+                    stats['Knockdown Avg'] = str(total_kd)
+                
+                # Calculate averages per 15 minutes (simplified calculation)
+                # For now, we'll use basic calculations based on total fights
+                if ssl_matches:
+                    num_fights = len([x for x in ssl_matches if x.isdigit()])
+                    if num_fights > 0:
+                        avg_ssl_per_fight = total_ssl / num_fights
+                        # Assuming average fight time of 10 minutes, scale to 15 minutes
+                        stats['Sig. Strikes Landed Per Min'] = f"{(avg_ssl_per_fight * 1.5):.1f}"
+                
+                # Calculate takedown average per 15 minutes
+                if tdl_matches:
+                    num_fights = len([x for x in tdl_matches if x.isdigit()])
+                    if num_fights > 0:
+                        avg_tdl_per_fight = total_tdl / num_fights
+                        stats['Takedown avg Per 15 Min'] = f"{(avg_tdl_per_fight * 1.5):.1f}"
+                
+                # For now, set some default values for missing stats
+                stats['Sig. Strikes Absorbed Per Min'] = "N/A"
+                stats['Submission avg Per 15 Min'] = "N/A"
+                stats['Sig. Str. Defense'] = "N/A"
+                stats['Takedown Defense'] = "N/A"
+                
+            except Exception as e:
+                print(f"Error parsing detailed stats from JSON: {e}")
+            
+            return stats
+            
+        except Exception as e:
+            print(f"Error extracting detailed stats: {e}")
+            return {
+                'Striking Accuracy': '',
+                'Sig. Strikes Landed': '',
+                'Sig. Strikes Attempted': '',
+                'Sig. Strikes Landed Per Min': '',
+                'Sig. Strikes Absorbed Per Min': '',
+                'Takedown Accuracy': '',
+                'Takedowns Landed': '',
+                'Takedowns Attempted': '',
+                'Takedown avg Per 15 Min': '',
+                'Submission avg Per 15 Min': '',
+                'Sig. Str. Defense': '',
+                'Takedown Defense': '',
+                'Knockdown Avg': ''
+            }
     
     def _extract_fight_history_from_html(self, html_content: str) -> List[Dict]:
         """Extract detailed fight history with statistics from HTML patterns"""
@@ -407,9 +523,8 @@ def main():
     df = processor.process_all_fighters(test_mode=args.test)
     
     if not df.empty:
-        # Save final CSV
-        output_file = "test_fighter_profiles.csv" if args.test else "fighter_profiles.csv"
-        output_file = processor.save_final_csv(df, output_file)
+        # Save final CSV - ALWAYS update the main fighter_profiles.csv
+        output_file = processor.save_final_csv(df, "fighter_profiles.csv")
         print(f"Final processing complete!")
         print(f"Output file: {output_file}")
         print(f"Total fighters processed: {len(df)}")

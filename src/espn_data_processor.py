@@ -406,6 +406,7 @@ class ESPNDataProcessor:
         logging.info(f"Processing HTML for {len(fighter_names)} fighters")
         
         # Scrape HTML files
+        
         new_html_files = self.scrape_fighter_htmls(fighter_names)
         
         # Apply UPSERT logic to HTML files
@@ -427,9 +428,15 @@ class ESPNDataProcessor:
         # Apply UPSERT logic (use fighter name as key)
         updated_df = self._upsert_data('profiles', new_df)
         
-        # Save back to data folder
+        # Save back to data folder with proper format
         updated_df.to_csv(self.profiles_file, index=False)
         logging.info(f"Saved fighter profiles: {len(updated_df)} records to {self.profiles_file}")
+        
+        # Also save a backup with timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_file = self.data_folder / f"fighter_profiles_backup_{timestamp}.csv"
+        updated_df.to_csv(backup_file, index=False)
+        logging.info(f"Backup saved to: {backup_file}")
         
         return updated_df
     
@@ -442,6 +449,7 @@ class ESPNDataProcessor:
         
         # Get all HTML files
         html_files = list(self.fighter_html_folder.glob("*.html"))
+        logging.info(f"Found {len(html_files)} HTML files to process")
         
         for html_file in html_files:
             try:
@@ -456,82 +464,81 @@ class ESPNDataProcessor:
                 if len(html_content) < 10000:
                     continue
                 
-                # Look for the complete JSON structure
-                # The data is embedded in a large JSON object
-                json_start_pattern = r'"prtlCmnApiRsp":\s*{'
-                start_match = re.search(json_start_pattern, html_content)
-                
-                if not start_match:
+                # Look for the ESPN embedded JSON object
+                match = re.search(r'"prtlCmnApiRsp"\s*:\s*({.*?})\s*,\s*"pageType"', html_content, re.DOTALL)
+                if not match:
+                    logging.debug(f"No ESPN JSON found in {fighter_name}")
                     continue
-                
-                # Find the start position (after the key)
-                start_pos = start_match.end() - 1  # Start at the opening brace
-                
-                # Find the matching closing brace by counting braces
-                brace_count = 0
-                in_string = False
-                escape_next = False
-                end_pos = start_pos
-                
-                for i, char in enumerate(html_content[start_pos:], start_pos):
-                    if escape_next:
-                        escape_next = False
-                        continue
-                    
-                    if char == '\\':
-                        escape_next = True
-                        continue
-                    
-                    if char == '"' and not escape_next:
-                        in_string = not in_string
-                        continue
-                    
-                    if not in_string:
-                        if char == '{':
-                            brace_count += 1
-                        elif char == '}':
-                            brace_count -= 1
-                            if brace_count == 0:
-                                end_pos = i + 1
-                                break
-                
-                if brace_count != 0:
-                    continue
-                
-                # Extract the JSON string (just the object part)
-                json_str = html_content[start_pos:end_pos]
-                
-                # Clean up the JSON string
-                json_str = re.sub(r'//.*?\n', '\n', json_str)  # Remove comments
-                json_str = re.sub(r',\s*}', '}', json_str)  # Remove trailing commas
-                
+                json_str = match.group(1)
                 try:
                     data = json.loads(json_str)
-                except json.JSONDecodeError:
+                except Exception as e:
+                    logging.debug(f"JSON parse error for {fighter_name}: {e}")
                     continue
-                
-                # Navigate to athlete data
-                if 'athlete' not in data:
+                # Navigate to athlete data (ESPN structure uses plyrHdr)
+                if 'plyrHdr' not in data:
+                    logging.debug(f"No plyrHdr found in {fighter_name}")
                     continue
-                
-                athlete_data = data['athlete']
-                
-                # Extract profile information
+                athlete_data = data['plyrHdr']
+                logging.info(f"Successfully extracted data for {fighter_name}")
+
+                # Extract profile information with proper column format
                 profile = {
-                    'Fighter Name': fighter_name,
-                    'ESPN URL': f"https://www.espn.com/mma/fighter/_/id/{athlete_data.get('id', '')}/{fighter_name.lower().replace(' ', '-')}",
-                    'Scraped At': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'Total Fights': 0,
-                    'Last Updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    'Name': fighter_name,
+                    'Division Tr': athlete_data.get('ath', {}).get('wghtclss', '') if 'ath' in athlete_data else '',
+                    'Division Rk': '',
+                    'Wins by Kn': 0,
+                    'Wins by Su': 0,
+                    'First Roun': 0,
+                    'Wins by De': 0,
+                    'Striking ac': '',
+                    'Sig. Strike': 0,
+                    'Takedownr': 0,
+                    'Sig. Str. La': 0,
+                    'Sig. Str. At': 0,
+                    'Submissio': 0,
+                    'Sig. Str. De': '',
+                    'Knockdow': 0,
+                    'Average Sig': '',
+                    'Event_1_H': '',
+                    'Event_1_D': '',
+                    'Event_1_R': '',
+                    'Event_1_Ti': '',
+                    'Event_1_M': '',
+                    'Event_2_H': '',
+                    'Event_2_D': '',
+                    'Event_2_R': '',
+                    'Event_2_Ti': '',
+                    'Event_2_M': '',
+                    'Event_3_H': '',
+                    'Event_3_D': '',
+                    'Event_3_R': '',
+                    'Event_3_Ti': '',
+                    'Event_3_M': '',
+                    'Status': 'Active',
+                    'Place_ct': '',
+                    'Fighting_s': '',
+                    'Age': '',
+                    'Height': '',
+                    'Weight': '',
+                    'Octagon_Reach': '',
+                    'Leg_reach': '',
+                    'Reach': '',
+                    'Trains_at': '',
+                    'Fight': '',
+                    'Win': '',
+                    'Title': '',
+                    'Defeat': '',
+                    'Former Champion': ''
                 }
                 
-                # Extract record from statsSummary
-                if 'statsSummary' in athlete_data and 'statistics' in athlete_data['statsSummary']:
-                    stats = athlete_data['statsSummary']['statistics']
+                # Extract record from statsBlck.vals (correct ESPN structure)
+                if 'statsBlck' in athlete_data and 'vals' in athlete_data['statsBlck']:
+                    stats = athlete_data['statsBlck']['vals']
                     for stat in stats:
-                        if stat.get('name') == 'wins-losses-draws':
-                            record = stat.get('displayValue', '0-0-0')
-                            profile['Division Record'] = record
+                        if stat.get('name') == 'Wins-Losses-Draws':
+                            record = stat.get('val', '0-0-0')
+                            profile['Division Rk'] = record
                             
                             # Parse W-L-D
                             parts = record.split('-')
@@ -539,44 +546,64 @@ class ESPNDataProcessor:
                                 wins = int(parts[0]) if parts[0].isdigit() else 0
                                 losses = int(parts[1]) if parts[1].isdigit() else 0
                                 draws = int(parts[2]) if parts[2].isdigit() else 0
-                                profile['Total Fights'] = wins + losses + draws
-                                profile['Wins by Knockout'] = 0
-                                profile['Wins by Submission'] = 0
-                                profile['Wins by Decision'] = 0
-                            break
-                
-                # Extract other stats
-                if 'statsSummary' in athlete_data and 'statistics' in athlete_data['statsSummary']:
-                    stats = athlete_data['statsSummary']['statistics']
-                    for stat in stats:
-                        if stat.get('name') == 'tkos-tkoLosses':
-                            tko_record = stat.get('displayValue', '0-0')
+                                profile['Wins by De'] = wins
+                        elif stat.get('name') == 'Technical Knockout-Technical Knockout Losses':
+                            tko_record = stat.get('val', '0-0')
                             parts = tko_record.split('-')
                             if len(parts) >= 2:
-                                profile['Wins by Knockout'] = int(parts[0]) if parts[0].isdigit() else 0
-                        elif stat.get('name') == 'submissions-submissionLosses':
-                            sub_record = stat.get('displayValue', '0-0')
+                                profile['Wins by Kn'] = int(parts[0]) if parts[0].isdigit() else 0
+                        elif stat.get('name') == 'Submissions-Submission Losses':
+                            sub_record = stat.get('val', '0-0')
                             parts = sub_record.split('-')
                             if len(parts) >= 2:
-                                profile['Wins by Submission'] = int(parts[0]) if parts[0].isdigit() else 0
+                                profile['Wins by Su'] = int(parts[0]) if parts[0].isdigit() else 0
                 
-                # Extract personal info
-                if 'displayHeight' in athlete_data:
-                    profile['Height'] = athlete_data['displayHeight']
-                if 'displayWeight' in athlete_data:
-                    profile['Weight'] = athlete_data['displayWeight']
-                if 'displayDOB' in athlete_data:
-                    profile['Age'] = athlete_data.get('age', '')
-                if 'displayReach' in athlete_data:
-                    profile['Reach'] = athlete_data['displayReach']
-                if 'stance' in athlete_data and 'text' in athlete_data['stance']:
-                    profile['Stance'] = athlete_data['stance']['text']
-                if 'weightClass' in athlete_data and 'text' in athlete_data['weightClass']:
-                    profile['Division'] = athlete_data['weightClass']['text']
-                if 'citizenship' in athlete_data:
-                    profile['Country'] = athlete_data['citizenship']
-                if 'association' in athlete_data and 'name' in athlete_data['association']:
-                    profile['Team'] = athlete_data['association']['name']
+                # Extract personal info from ath (correct ESPN structure)
+                if 'ath' in athlete_data:
+                    ath_data = athlete_data['ath']
+                    if 'htwt' in ath_data:
+                        profile['Height'] = ath_data['htwt']
+                        profile['Weight'] = ath_data['htwt']
+                    if 'dob' in ath_data:
+                        # Extract age from dob like "12/20/1990 (34)"
+                        dob_str = ath_data['dob']
+                        if '(' in dob_str and ')' in dob_str:
+                            age_str = dob_str.split('(')[1].split(')')[0]
+                            profile['Age'] = float(age_str) if age_str.isdigit() else ''
+                    if 'rch' in ath_data:
+                        profile['Reach'] = ath_data['rch']
+                    if 'stnc' in ath_data:
+                        profile['Fighting_s'] = ath_data['stnc']
+                    if 'cntry' in ath_data:
+                        profile['Place_ct'] = ath_data['cntry']
+                    if 'tm' in ath_data:
+                        profile['Trains_at'] = ath_data['tm']
+                
+
+                
+                # Extract personal info from plyrHdr.ath (correct ESPN structure)
+                if 'plyrHdr' in athlete_data and 'ath' in athlete_data['plyrHdr']:
+                    ath_data = athlete_data['plyrHdr']['ath']
+                    if 'htwt' in ath_data:
+                        profile['Height'] = ath_data['htwt']
+                    if 'htwt' in ath_data:
+                        profile['Weight'] = ath_data['htwt']
+                    if 'dob' in ath_data:
+                        # Extract age from dob like "12/20/1990 (34)"
+                        dob_str = ath_data['dob']
+                        if '(' in dob_str and ')' in dob_str:
+                            age_str = dob_str.split('(')[1].split(')')[0]
+                            profile['Age'] = float(age_str) if age_str.isdigit() else ''
+                    if 'rch' in ath_data:
+                        profile['Reach'] = ath_data['rch']
+                    if 'stnc' in ath_data:
+                        profile['Fighting_s'] = ath_data['stnc']
+                    if 'cntry' in ath_data:
+                        profile['Place_ct'] = ath_data['cntry']
+                    if 'tm' in ath_data:
+                        profile['Trains_at'] = ath_data['tm']
+                    if 'wghtclss' in ath_data:
+                        profile['Division Tr'] = ath_data['wghtclss']
                 
                 profiles.append(profile)
                 
@@ -584,7 +611,11 @@ class ESPNDataProcessor:
                 self.logger.warning(f"Error processing {html_file.name}: {e}")
                 continue
         
-        return pd.DataFrame(profiles)
+        result_df = pd.DataFrame(profiles)
+        logging.info(f"Extracted {len(profiles)} profiles from HTML files")
+        if len(profiles) > 0:
+            logging.info(f"Sample profile: {profiles[0]}")
+        return result_df
     
     def _parse_fighter_profile(self, soup: BeautifulSoup, fighter_name: str) -> dict:
         """Parse fighter profile data from HTML soup"""
@@ -825,8 +856,8 @@ class ESPNDataProcessor:
                     # Use Player + Date + Opponent as composite key
                     composite_key = ['Player', 'Date', 'Opponent']
                 else:
-                    # Use Fighter Name as key for profiles
-                    composite_key = ['Fighter Name']
+                    # Use Name as key for profiles
+                    composite_key = ['Name']
                 
                 # Combine existing and new data
                 combined_df = pd.concat([existing_df, new_df], ignore_index=True)
