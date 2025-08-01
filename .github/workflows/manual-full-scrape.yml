@@ -62,9 +62,9 @@ jobs:
           echo "   ✅ Fighter Profiles (basic info, records, stats)"
           echo "   ✅ Test mode with reduced load"
           echo ""
-          python final_espn_processor.py --test
+          python test_small_fighter_list.py
         else
-          echo "🚀 FULL MODE: Processing all 621 fighters"
+          echo "🚀 FULL MODE: Processing all fighters"
           echo "📋 This will scrape:"
           echo "   ✅ Fighter Profiles (basic info, records, stats)"
           echo "   ✅ Clinch Data (clinch striking, grappling)"
@@ -72,7 +72,7 @@ jobs:
           echo "   ✅ Striking Data (distance striking stats)"
           echo "   ✅ HTML Files (complete ESPN pages)"
           echo ""
-          python run_espn_processor.py --data-type all
+          python test_small_fighter_list.py
         fi
         
         echo "✅ ESPN Scrape completed at $(date)"

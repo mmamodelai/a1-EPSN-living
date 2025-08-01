@@ -57,7 +57,7 @@ jobs:
         echo "   ✅ Test mode with reduced load"
         echo ""
         
-        python final_espn_processor.py --test
+        python test_small_fighter_list.py
         
         echo "✅ Weekly ESPN Data Update completed at $(date)"
         
