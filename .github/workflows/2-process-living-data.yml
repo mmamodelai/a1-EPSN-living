@@ -61,12 +61,118 @@ jobs:
         echo "   ✅ Ground Data (ground fighting stats)"
         echo ""
         
-        python -c "
-        from src.espn_data_processor import ESPNDataProcessor
-        processor = ESPNDataProcessor('data')
-        processor.process_fighter_htmls()
-        print('✅ Living documents processed successfully')
-        "
+        # Create a Python script to process HTML files into living documents
+        cat > process_html_to_living.py << 'EOF'
+        #!/usr/bin/env python3
+        """
+        Process HTML files to create living documents
+        """
+        import pandas as pd
+        import json
+        import re
+        from pathlib import Path
+        from bs4 import BeautifulSoup
+        import logging
+        
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger(__name__)
+        
+        def extract_fight_data_from_html(html_file):
+            """Extract fight-by-fight data from ESPN HTML file"""
+            try:
+                with open(html_file, 'r', encoding='utf-8') as f:
+                    html_content = f.read()
+                
+                # Skip small files
+                if len(html_content) < 10000:
+                    return []
+                
+                # Extract fighter name from filename
+                fighter_name = html_file.stem.replace('_', ' ')
+                
+                # Look for ESPN JSON data
+                match = re.search(r'"prtlCmnApiRsp"\s*:\s*({.*?})\s*,\s*"pageType"', html_content, re.DOTALL)
+                if not match:
+                    return []
+                
+                json_str = match.group(1)
+                data = json.loads(json_str)
+                
+                fights = []
+                
+                # Extract fight data from ESPN structure
+                if 'ath' in data and 'stats' in data['ath']:
+                    stats = data['ath']['stats']
+                    
+                    # Process each fight
+                    for stat in stats:
+                        if 'evt' in stat and 'opp' in stat:
+                            fight_data = {
+                                'Player': fighter_name,
+                                'Date': stat.get('evt', {}).get('dt', ''),
+                                'Opponent': stat.get('opp', {}).get('ath', {}).get('nm', ''),
+                                'Event': stat.get('evt', {}).get('nm', 'ESPN Scraped'),
+                                'Result': stat.get('rslt', ''),
+                                'SGBL': stat.get('sgb', {}).get('lnd', 0),
+                                'SGBA': stat.get('sgb', {}).get('att', 0),
+                                'SGHL': stat.get('sgh', {}).get('lnd', 0),
+                                'SGHA': stat.get('sgh', {}).get('att', 0),
+                                'SGLL': stat.get('sgl', {}).get('lnd', 0),
+                                'SGLA': stat.get('sgl', {}).get('att', 0),
+                                'AD': stat.get('td', {}).get('lnd', 0),
+                                'ADHG': stat.get('td', {}).get('hg', 0),
+                                'ADTB': stat.get('td', {}).get('tb', 0),
+                                'ADTM': stat.get('td', {}).get('tm', 0),
+                                'ADTS': stat.get('td', {}).get('ts', 0),
+                                'SM': stat.get('sm', 0),
+                                'SA': stat.get('sa', 0),
+                                'SL': stat.get('sl', 0)
+                            }
+                            fights.append(fight_data)
+                
+                return fights
+                
+            except Exception as e:
+                logger.error(f"Error processing {html_file}: {e}")
+                return []
+        
+        def main():
+            """Main processing function"""
+            html_folder = Path("data/FighterHTMLs")
+            
+            if not html_folder.exists():
+                logger.error("HTML folder not found")
+                return
+            
+            html_files = list(html_folder.glob("*.html"))
+            logger.info(f"Processing {len(html_files)} HTML files")
+            
+            all_fights = []
+            
+            for html_file in html_files:
+                fights = extract_fight_data_from_html(html_file)
+                all_fights.extend(fights)
+                logger.info(f"Extracted {len(fights)} fights from {html_file.name}")
+            
+            if all_fights:
+                # Create DataFrame
+                df = pd.DataFrame(all_fights)
+                
+                # Save to living documents
+                df.to_csv("data/striking_data_living.csv", index=False)
+                df.to_csv("data/clinch_data_living.csv", index=False)
+                df.to_csv("data/ground_data_living.csv", index=False)
+                
+                logger.info(f"Created living documents with {len(df)} fight records")
+            else:
+                logger.warning("No fight data extracted")
+        
+        if __name__ == "__main__":
+            main()
+        EOF
+        
+        # Run the processing script
+        python process_html_to_living.py
         
         echo "✅ Living data processing completed at $(date)"
         
