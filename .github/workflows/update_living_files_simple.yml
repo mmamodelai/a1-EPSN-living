@@ -1,0 +1,85 @@
+name: Update Living Files (Simple)
+
+on:
+  schedule:
+    # Run every Monday at 6 AM UTC (after weekend fights)
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    # Allow manual trigger
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'test_small_fighter_list.py'
+
+jobs:
+  update-living-files:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Run ESPN scraper and update living files
+      run: |
+        echo "🎯 Starting ESPN scraper for living files update..."
+        python test_small_fighter_list.py
+        
+        echo "🔄 Processing HTML files to update living documents..."
+        python -c "
+        from src.espn_data_processor import ESPNDataProcessor
+        processor = ESPNDataProcessor('data')
+        processor.process_fighter_htmls()
+        print('✅ Living documents updated successfully')
+        "
+        
+        echo "📊 Extracting detailed fighter statistics..."
+        python extract_stats_from_html.py
+        
+        echo "✅ Living files update complete!"
+        
+    - name: Create backup
+      run: |
+        echo "💾 Creating backup..."
+        timestamp=$(date +"%Y%m%d_%H%M%S")
+        mkdir -p "data/backups/backup_${timestamp}"
+        cp data/striking_data_living.csv "data/backups/backup_${timestamp}/" 2>/dev/null || echo "No striking data to backup"
+        cp data/clinch_data_living.csv "data/backups/backup_${timestamp}/" 2>/dev/null || echo "No clinch data to backup"
+        cp data/ground_data_living.csv "data/backups/backup_${timestamp}/" 2>/dev/null || echo "No ground data to backup"
+        cp data/fighter_profiles.csv "data/backups/backup_${timestamp}/" 2>/dev/null || echo "No profiles to backup"
+        echo "✅ Backup created: backup_${timestamp}"
+        
+    - name: Commit and push changes
+      run: |
+        echo "🚀 Committing updated living files..."
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        # Add all changes
+        git add data/ || echo "No data changes to commit"
+        git add data/backups/ || echo "No backup changes to commit"
+        
+        # Check if there are changes to commit
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          # Commit with timestamp
+          timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+          git commit -m "🤖 Auto-update living files - $timestamp"
+          
+          # Push changes
+          git push
+          echo "✅ Changes committed and pushed"
+        fi 

@@ -1,0 +1,172 @@
+name: Update Living Files
+
+on:
+  schedule:
+    # Run every Monday at 6 AM UTC (after weekend fights)
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    # Allow manual trigger
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'data/**'
+      - 'test_small_fighter_list.py'
+
+jobs:
+  update-living-files:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Create data directory structure
+      run: |
+        mkdir -p data/FighterHTMLs
+        mkdir -p data/backups
+        
+    - name: Download existing data (if available)
+      run: |
+        # Try to download existing data from releases or artifacts
+        # This preserves existing HTML files and living documents
+        echo "Setting up data directory structure"
+        
+    - name: Run ESPN scraper on test fighters
+      run: |
+        echo "🎯 Starting ESPN scraper for living files update..."
+        python test_small_fighter_list.py
+      env:
+        # Add any environment variables needed for scraping
+        PYTHONPATH: ${{ github.workspace }}
+        
+    - name: Process HTML to living documents
+      run: |
+        echo "🔄 Processing HTML files to update living documents..."
+        python -c "
+        from src.espn_data_processor import ESPNDataProcessor
+        processor = ESPNDataProcessor('data')
+        processor.process_fighter_htmls()
+        print('✅ Living documents updated successfully')
+        "
+        
+    - name: Extract fighter statistics
+      run: |
+        echo "📊 Extracting detailed fighter statistics..."
+        python extract_stats_from_html.py
+        
+    - name: Create backup of living files
+      run: |
+        echo "💾 Creating backup of living files..."
+        timestamp=$(date +"%Y%m%d_%H%M%S")
+        mkdir -p "data/backups/backup_${timestamp}"
+        cp data/striking_data_living.csv "data/backups/backup_${timestamp}/"
+        cp data/clinch_data_living.csv "data/backups/backup_${timestamp}/"
+        cp data/ground_data_living.csv "data/backups/backup_${timestamp}/"
+        cp data/fighter_profiles.csv "data/backups/backup_${timestamp}/"
+        echo "✅ Backup created: backup_${timestamp}"
+        
+    - name: Generate living files report
+      run: |
+        echo "📋 Generating living files update report..."
+        python -c "
+        import pandas as pd
+        from datetime import datetime
+        
+        # Load living documents
+        striking_df = pd.read_csv('data/striking_data_living.csv')
+        clinch_df = pd.read_csv('data/clinch_data_living.csv')
+        ground_df = pd.read_csv('data/ground_data_living.csv')
+        profiles_df = pd.read_csv('data/fighter_profiles.csv')
+        
+        # Generate report
+        report = f'''
+        # Living Files Update Report
+        Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+        
+        ## Data Summary
+        - **Striking Records**: {len(striking_df):,} fights
+        - **Clinch Records**: {len(clinch_df):,} fights  
+        - **Ground Records**: {len(ground_df):,} fights
+        - **Fighter Profiles**: {len(profiles_df):,} fighters
+        
+        ## Recent Updates
+        - Latest fight date: {striking_df['Date'].max() if 'Date' in striking_df.columns else 'N/A'}
+        - Fighters with recent data: {len(striking_df[striking_df['Date'] >= '2025-01-01']) if 'Date' in striking_df.columns else 'N/A'}
+        
+        ## System Status
+        ✅ Living documents updated successfully
+        ✅ Fighter profiles enhanced with detailed statistics
+        ✅ Backup created for data safety
+        '''
+        
+        with open('LIVING_FILES_UPDATE_REPORT.md', 'w') as f:
+            f.write(report)
+            
+        print('✅ Report generated: LIVING_FILES_UPDATE_REPORT.md')
+        "
+        
+    - name: Commit and push changes
+      run: |
+        echo "🚀 Committing updated living files..."
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        # Add all changes
+        git add data/striking_data_living.csv
+        git add data/clinch_data_living.csv
+        git add data/ground_data_living.csv
+        git add data/fighter_profiles.csv
+        git add data/backups/
+        git add data/FighterHTMLs/
+        git add LIVING_FILES_UPDATE_REPORT.md
+        
+        # Commit with timestamp
+        timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+        git commit -m "🤖 Auto-update living files - $timestamp
+        
+        - Updated striking, clinch, and ground data
+        - Enhanced fighter profiles with detailed statistics
+        - Created backup of previous data
+        - Generated update report"
+        
+        # Push changes
+        git push
+        
+    - name: Create release with updated data
+      if: github.event_name == 'schedule'
+      run: |
+        echo "🏷️ Creating release with updated living files..."
+        timestamp=$(date +"%Y%m%d_%H%M%S")
+        version="v1.0.$timestamp"
+        
+        # Create release assets
+        tar -czf "living_files_${timestamp}.tar.gz" data/
+        
+        # Create release using GitHub CLI
+        gh release create "$version" \
+          --title "Living Files Update - $timestamp" \
+          --notes "Automated update of ESPN MMA living documents and fighter profiles" \
+          "living_files_${timestamp}.tar.gz"
+          
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: living-files-update
+        path: |
+          data/striking_data_living.csv
+          data/clinch_data_living.csv
+          data/ground_data_living.csv
+          data/fighter_profiles.csv
+          LIVING_FILES_UPDATE_REPORT.md
+        retention-days: 30 
