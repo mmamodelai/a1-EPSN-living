@@ -1,0 +1,144 @@
+name: 2. Process Living Data
+
+on:
+  schedule:
+    - cron: '30 6 * * 1'  # Monday 6:30 AM UTC (after scraping)
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Run in test mode with 24 fighters (faster)'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  process-living-data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Verify HTML files exist
+      run: |
+        echo "🔍 Checking HTML files..."
+        
+        if [ -d "data/FighterHTMLs" ]; then
+          html_count=$(find data/FighterHTMLs -name "*.html" | wc -l)
+          echo "✅ Found $html_count HTML files"
+          
+          if [ $html_count -eq 0 ]; then
+            echo "❌ No HTML files found - run '1. Scrape ESPN' workflow first"
+            exit 1
+          fi
+          
+          # Show sample files
+          echo "📋 Sample HTML files:"
+          find data/FighterHTMLs -name "*.html" | head -5
+        else
+          echo "❌ FighterHTMLs directory not found - run '1. Scrape ESPN' workflow first"
+          exit 1
+        fi
+        
+    - name: Process HTML to living documents
+      run: |
+        echo "🔄 Processing HTML files to living documents..."
+        echo "📋 This will create:"
+        echo "   ✅ Striking Data (distance striking stats)"
+        echo "   ✅ Clinch Data (clinch striking, grappling)"
+        echo "   ✅ Ground Data (ground fighting stats)"
+        echo ""
+        
+        python -c "
+        from src.espn_data_processor import ESPNDataProcessor
+        processor = ESPNDataProcessor('data')
+        processor.process_fighter_htmls()
+        print('✅ Living documents processed successfully')
+        "
+        
+        echo "✅ Living data processing completed at $(date)"
+        
+    - name: Verify living documents
+      run: |
+        echo "🔍 Verifying living documents..."
+        echo ""
+        
+        # Check CSV files
+        echo "📊 Living Documents:"
+        for file in data/striking_data_living.csv data/clinch_data_living.csv data/ground_data_living.csv; do
+          if [ -f "$file" ]; then
+            size=$(ls -lh "$file" | awk '{print $5}')
+            lines=$(wc -l < "$file")
+            echo "   $(basename "$file"): $lines records ($size)"
+          else
+            echo "   ❌ $(basename "$file"): Not found"
+          fi
+        done
+        
+        # Show recent data
+        echo ""
+        echo "📋 Recent fight data:"
+        if [ -f "data/striking_data_living.csv" ]; then
+          echo "Latest 3 fights from striking data:"
+          tail -4 data/striking_data_living.csv | head -3
+        fi
+        
+    - name: Create backup of living files
+      run: |
+        echo "💾 Creating backup of living files..."
+        timestamp=$(date +"%Y%m%d_%H%M%S")
+        mkdir -p "data/backups/backup_${timestamp}"
+        
+        for file in data/striking_data_living.csv data/clinch_data_living.csv data/ground_data_living.csv; do
+          if [ -f "$file" ]; then
+            cp "$file" "data/backups/backup_${timestamp}/"
+            echo "✅ Backed up $(basename "$file")"
+          fi
+        done
+        
+        echo "✅ Backup created: backup_${timestamp}"
+        
+    - name: Commit and push living documents
+      run: |
+        echo "🚀 Committing living documents..."
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        # Add living documents and backups
+        git add data/striking_data_living.csv data/clinch_data_living.csv data/ground_data_living.csv || echo "No living documents to add"
+        git add data/backups/ || echo "No backups to add"
+        
+        # Check if there are changes to commit
+        if git diff --staged --quiet; then
+          echo "No changes to living documents to commit"
+        else
+          # Commit with timestamp
+          timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+          git commit -m "📊 Living Data: Striking/Clinch/Ground - $timestamp"
+          
+          # Push changes
+          git push
+          echo "✅ Living documents committed and pushed"
+        fi
+        
+    - name: Summary
+      run: |
+        echo ""
+        echo "🎯 Living Data Processing Summary:"
+        echo "📁 Repository: A1-ESPN-Profiles"
+        echo "📋 Output: Striking, Clinch, Ground living documents"
+        echo "⏰ Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo "🔄 Next step: Run '3. Process Fighter Profiles' workflow"
+        echo "✅ Pipeline: Step 2 Complete" 

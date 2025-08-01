@@ -1,0 +1,196 @@
+name: 3. Process Fighter Profiles
+
+on:
+  schedule:
+    - cron: '0 7 * * 1'  # Monday 7 AM UTC (after living data)
+  workflow_dispatch:
+    inputs:
+      test_mode:
+        description: 'Run in test mode with 24 fighters (faster)'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  process-fighter-profiles:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Verify prerequisites
+      run: |
+        echo "🔍 Checking prerequisites..."
+        
+        # Check HTML files
+        if [ -d "data/FighterHTMLs" ]; then
+          html_count=$(find data/FighterHTMLs -name "*.html" | wc -l)
+          echo "✅ Found $html_count HTML files"
+        else
+          echo "❌ FighterHTMLs directory not found - run '1. Scrape ESPN' workflow first"
+          exit 1
+        fi
+        
+        # Check living documents
+        missing_files=0
+        for file in data/striking_data_living.csv data/clinch_data_living.csv data/ground_data_living.csv; do
+          if [ -f "$file" ]; then
+            echo "✅ Found $(basename "$file")"
+          else
+            echo "❌ Missing $(basename "$file") - run '2. Process Living Data' workflow first"
+            missing_files=$((missing_files + 1))
+          fi
+        done
+        
+        if [ $missing_files -gt 0 ]; then
+          echo "❌ Missing $missing_files living document(s) - run previous workflows first"
+          exit 1
+        fi
+        
+        echo "✅ All prerequisites met"
+        
+    - name: Extract fighter statistics from HTML
+      run: |
+        echo "📊 Extracting detailed fighter statistics from HTML..."
+        echo "📋 This will extract:"
+        echo "   ✅ Career statistics (strikes, takedowns, accuracy)"
+        echo "   ✅ Personal information (age, height, weight, reach)"
+        echo "   ✅ Fight records and win methods"
+        echo ""
+        
+        python extract_stats_from_html.py
+        
+        echo "✅ Fighter statistics extraction completed at $(date)"
+        
+    - name: Enhance fighter profiles
+      run: |
+        echo "🔧 Enhancing fighter profiles with additional data..."
+        echo "📋 This will add:"
+        echo "   ✅ Rate calculations (per-minute, per-15-minute)"
+        echo "   ✅ Defensive percentages"
+        echo "   ✅ Win method breakdowns"
+        echo "   ✅ Target breakdowns (head, body, legs)"
+        echo ""
+        
+        # Run enhancement scripts if they exist
+        if [ -f "enhance_fighter_profiles.py" ]; then
+          python enhance_fighter_profiles.py
+          echo "✅ Fighter profiles enhanced"
+        else
+          echo "⚠️  enhance_fighter_profiles.py not found, skipping enhancement"
+        fi
+        
+        if [ -f "extract_missing_fields.py" ]; then
+          python extract_missing_fields.py
+          echo "✅ Missing fields extracted"
+        else
+          echo "⚠️  extract_missing_fields.py not found, skipping missing fields"
+        fi
+        
+    - name: Verify fighter profiles
+      run: |
+        echo "🔍 Verifying fighter profiles..."
+        echo ""
+        
+        # Check fighter profiles
+        echo "📊 Fighter Profiles:"
+        for file in data/fighter_profiles.csv data/enhanced_fighter_profiles*.csv; do
+          if [ -f "$file" ]; then
+            size=$(ls -lh "$file" | awk '{print $5}')
+            lines=$(wc -l < "$file")
+            echo "   $(basename "$file"): $lines fighters ($size)"
+          fi
+        done
+        
+        # Show sample profile
+        echo ""
+        echo "📋 Sample fighter profile:"
+        if [ -f "data/fighter_profiles.csv" ]; then
+          head -2 data/fighter_profiles.csv | tail -1
+        fi
+        
+    - name: Create backup of fighter profiles
+      run: |
+        echo "💾 Creating backup of fighter profiles..."
+        timestamp=$(date +"%Y%m%d_%H%M%S")
+        mkdir -p "data/backups/backup_${timestamp}"
+        
+        for file in data/fighter_profiles.csv data/enhanced_fighter_profiles*.csv; do
+          if [ -f "$file" ]; then
+            cp "$file" "data/backups/backup_${timestamp}/"
+            echo "✅ Backed up $(basename "$file")"
+          fi
+        done
+        
+        echo "✅ Backup created: backup_${timestamp}"
+        
+    - name: Commit and push fighter profiles
+      run: |
+        echo "🚀 Committing fighter profiles..."
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        # Add fighter profiles and backups
+        git add data/fighter_profiles.csv data/enhanced_fighter_profiles*.csv || echo "No fighter profiles to add"
+        git add data/backups/ || echo "No backups to add"
+        
+        # Check if there are changes to commit
+        if git diff --staged --quiet; then
+          echo "No changes to fighter profiles to commit"
+        else
+          # Commit with timestamp
+          timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+          git commit -m "👤 Fighter Profiles: Enhanced with detailed stats - $timestamp"
+          
+          # Push changes
+          git push
+          echo "✅ Fighter profiles committed and pushed"
+        fi
+        
+    - name: Generate final summary
+      run: |
+        echo ""
+        echo "🎯 Fighter Profiles Processing Summary:"
+        echo "📁 Repository: A1-ESPN-Profiles"
+        echo "📋 Output: Enhanced fighter profiles with detailed statistics"
+        echo "⏰ Completed: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        echo ""
+        echo "📊 Final Data Summary:"
+        
+        # Count records
+        if [ -f "data/striking_data_living.csv" ]; then
+          striking_count=$(wc -l < data/striking_data_living.csv)
+          echo "   Striking Records: $((striking_count - 1)) fights"
+        fi
+        
+        if [ -f "data/clinch_data_living.csv" ]; then
+          clinch_count=$(wc -l < data/clinch_data_living.csv)
+          echo "   Clinch Records: $((clinch_count - 1)) fights"
+        fi
+        
+        if [ -f "data/ground_data_living.csv" ]; then
+          ground_count=$(wc -l < data/ground_data_living.csv)
+          echo "   Ground Records: $((ground_count - 1)) fights"
+        fi
+        
+        if [ -f "data/fighter_profiles.csv" ]; then
+          profile_count=$(wc -l < data/fighter_profiles.csv)
+          echo "   Fighter Profiles: $((profile_count - 1)) fighters"
+        fi
+        
+        echo ""
+        echo "✅ Pipeline: Complete - All 3 steps finished!"
+        echo "🎉 ESPN MMA Data System is fully updated" 
