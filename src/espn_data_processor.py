@@ -179,7 +179,23 @@ class ESPNDataProcessor:
                 except Exception as e:
                     self.logger.error(f"Error saving HTML for {fighter_name}: {e}")
         
+        # Count new and updated files
+        new_count = 0
+        updated_count = 0
+        
+        for fighter_name, html_content in new_html_files.items():
+            safe_name = fighter_name.replace(' ', '_').replace('/', '_').replace('\\', '_')
+            html_file = self.fighter_html_folder / f"{safe_name}.html"
+            
+            if not html_file.exists():
+                new_count += 1
+            else:
+                updated_count += 1
+        
         self.logger.info(f"HTML UPSERT completed. Total files: {len(self.get_existing_html_files())}")
+        self.logger.info(f"New files: {new_count}, Updated files: {updated_count}")
+        
+        return new_count, updated_count
     
     def scrape_fighter_data(self, fighter_names: List[str]) -> Dict[str, pd.DataFrame]:
         """
@@ -354,7 +370,7 @@ class ESPNDataProcessor:
         """
         logging.info(f"Scraping HTML for {len(fighter_names)} fighters...")
         
-        from espn_scraper import ESPNFighterScraper
+        from src.espn_scraper import ESPNFighterScraper
         
         scraper = ESPNFighterScraper()
         scraped_htmls = {}
@@ -401,7 +417,7 @@ class ESPNDataProcessor:
             return
         
         fighters_df = pd.read_csv(fighters_file)
-        fighter_names = fighters_df['Fighter Name'].tolist()
+        fighter_names = fighters_df['fighters'].tolist()
         
         logging.info(f"Processing HTML for {len(fighter_names)} fighters")
         

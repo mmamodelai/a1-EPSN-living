@@ -30,6 +30,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        python -c "import pandas; print('Dependencies installed successfully')"
         
     - name: Verify HTML files exist
       run: |
@@ -64,8 +65,8 @@ jobs:
         python -c "
         from src.espn_data_processor import ESPNDataProcessor
         processor = ESPNDataProcessor('data')
-        processor.process_fighter_htmls()
-        print('✅ Living documents processed successfully')
+        new_count, updated_count = processor.process_fighter_htmls()
+        print(f'✅ Living documents processed successfully: {new_count} new, {updated_count} updated')
         "
         
         echo "✅ Living data processing completed at $(date)"
